@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same ref so a quick second push doesn't queue.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: privacy + build
+    runs-on: macos-14
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version || true
+          sw_vers
+
+      # Hard privacy gate — fails the build if any banned macOS API
+      # appears in the source tree. See Sources/miniowl/Privacy/ForbiddenImports.swift
+      # for the manifest and rationale.
+      - name: Privacy check (banned APIs)
+        run: ./scripts/check-privacy.sh
+
+      - name: Swift build (release)
+        run: swift build -c release
+
+      - name: Verify binary exists
+        run: |
+          test -x .build/release/miniowl
+          file .build/release/miniowl
+          ls -lh .build/release/miniowl
