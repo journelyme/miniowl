@@ -3,8 +3,26 @@
 # build-app.sh — compile miniowl and wrap the binary in a .app bundle.
 #
 # Produces build/miniowl.app which can be copied to /Applications and
-# launched like any other menu bar app. Ad-hoc signs with entitlements
-# so Accessibility prompts display correctly.
+# launched like any other menu bar app.
+#
+# Code-signing identity is auto-detected with this preference order:
+#   1. $MINIOWL_SIGNING_IDENTITY  (explicit override — use any string
+#      `security find-identity -v -p codesigning` accepts, e.g.
+#      "Developer ID Application: Your Name (TEAMID)")
+#   2. First "Developer ID Application: …" cert in your keychain
+#      (the proper macOS distribution cert — required to ship to
+#      others without "unidentified developer" warnings; can be
+#      issued from developer.apple.com if you have a paid Apple
+#      Developer Program account)
+#   3. First "Apple Development: …" cert in your keychain
+#      (works fine for personal use on your own Mac, and gives a
+#      *stable* TCC identity so the Accessibility grant survives
+#      rebuilds — until the cert expires, ~1 year)
+#   4. Ad-hoc signature ("- ") as a last resort — works but TCC
+#      grants invalidate on every rebuild because the cdhash changes
+#
+# To force a specific identity:
+#   MINIOWL_SIGNING_IDENTITY="Apple Development: Jane Doe (ABCD123456)" ./scripts/build-app.sh
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -13,7 +31,55 @@ cd "$(dirname "$0")/.."
 # 0. Privacy gate — fail the build before we waste cycles compiling.
 ./scripts/check-privacy.sh
 
-# 1. Compile release binary via SPM.
+# 1. Resolve a signing identity *before* compiling so we can fail
+#    early if something is misconfigured.
+resolve_signing_identity() {
+  if [[ -n "${MINIOWL_SIGNING_IDENTITY:-}" ]]; then
+    echo "$MINIOWL_SIGNING_IDENTITY"
+    return 0
+  fi
+
+  local devid_app
+  devid_app=$(security find-identity -v -p codesigning 2>/dev/null \
+              | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+  if [[ -n "$devid_app" ]]; then
+    echo "$devid_app"
+    return 0
+  fi
+
+  local apple_dev
+  apple_dev=$(security find-identity -v -p codesigning 2>/dev/null \
+              | awk -F'"' '/Apple Development/ {print $2; exit}')
+  if [[ -n "$apple_dev" ]]; then
+    echo "$apple_dev"
+    return 0
+  fi
+
+  echo "-"  # ad-hoc fallback
+}
+
+SIGN_IDENTITY=$(resolve_signing_identity)
+
+case "$SIGN_IDENTITY" in
+  "Developer ID Application:"*)
+    SIGN_KIND="developer-id (distribution-grade)"
+    ;;
+  "Apple Development:"*)
+    SIGN_KIND="apple-development (stable for personal use)"
+    ;;
+  "-")
+    SIGN_KIND="ad-hoc (TCC grant will reset on every rebuild)"
+    ;;
+  *)
+    SIGN_KIND="custom override"
+    ;;
+esac
+
+echo "signing with: $SIGN_IDENTITY"
+echo "      kind:   $SIGN_KIND"
+echo ""
+
+# 2. Compile release binary via SPM.
 echo "building miniowl (release)..."
 swift build -c release
 
@@ -25,7 +91,7 @@ if [[ ! -f "$BIN" ]]; then
   exit 1
 fi
 
-# 2. Lay out the .app bundle skeleton.
+# 3. Lay out the .app bundle skeleton.
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
@@ -39,16 +105,22 @@ if [[ -f miniowl-bundle/AppIcon.icns ]]; then
   cp miniowl-bundle/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# 3. Ad-hoc sign with entitlements. Ad-hoc signatures are stable for
-#    a single developer machine — TCC grants survive as long as the
-#    binary isn't moved. Switch to a real Developer ID identity later
-#    if you want to share the app across machines.
+# 4. Sign with the resolved identity. --identifier locks in the bundle
+#    ID at signing time so codesign doesn't have to derive it from the
+#    Info.plist (defends against accidental ID drift across rebuilds).
 codesign \
   --force \
-  --sign - \
+  --sign "$SIGN_IDENTITY" \
+  --identifier me.journely.miniowl \
   --entitlements miniowl-bundle/miniowl.entitlements \
   --options runtime \
   "$APP"
+
+# 5. Verify the signature is valid before we hand the user a broken bundle.
+codesign --verify --strict "$APP" 2>&1 || {
+  echo "error: codesign --verify failed for $APP"
+  exit 1
+}
 
 echo ""
 echo "built: $APP"
