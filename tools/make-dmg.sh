@@ -47,7 +47,10 @@ echo "[1/8] building signed .app via build-app.sh..."
 
 # Pull the signing identity out of the freshly-built .app so we sign
 # the .dmg with the SAME identity (which is required for notarization).
-SIGN_IDENTITY=$(codesign -dvv "$APP" 2>&1 \
+# Capture full output first to avoid SIGPIPE when awk's `exit` closes
+# the pipe early under `set -o pipefail`.
+CODESIGN_OUT=$(codesign -dvv "$APP" 2>&1 || true)
+SIGN_IDENTITY=$(printf '%s\n' "$CODESIGN_OUT" \
   | awk -F'Authority=' '/Authority=Developer ID Application/ {print $2; exit}')
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
@@ -72,12 +75,11 @@ codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | sed 's/^/      /' ||
   echo "error: codesign --verify failed for $APP"
   exit 1
 }
-# Hardened Runtime is required for notarization
-if ! codesign -dvv "$APP" 2>&1 | grep -q "flags=0x10000"; then
-  # 0x10000 = runtime flag set
-  if ! codesign -dvv "$APP" 2>&1 | grep -qE "runtime"; then
-    echo "warning: .app may not have Hardened Runtime enabled — notarization may fail"
-  fi
+# Hardened Runtime is required for notarization. Reuse the captured
+# CODESIGN_OUT (string) instead of re-piping codesign through grep,
+# which avoids SIGPIPE under `set -o pipefail`.
+if ! printf '%s\n' "$CODESIGN_OUT" | grep -q "runtime"; then
+  echo "warning: .app may not have Hardened Runtime enabled — notarization may fail"
 fi
 echo ""
 
