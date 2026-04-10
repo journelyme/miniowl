@@ -4,6 +4,8 @@
   <p><strong>A tiny, privacy-first macOS activity tracker that lives in your menu bar.</strong></p>
   <p>~1,500 lines of Swift · zero dependencies · plain JSONL files · no network</p>
   <p>
+    <a href="https://github.com/journelyme/miniowl/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/journelyme/miniowl/actions/workflows/ci.yml/badge.svg" /></a>
+    <a href="https://github.com/journelyme/miniowl/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/journelyme/miniowl?label=release" /></a>
     <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" />
     <img alt="Language" src="https://img.shields.io/badge/swift-5.9%2B-orange" />
     <img alt="License" src="https://img.shields.io/badge/license-MIT-green" />
