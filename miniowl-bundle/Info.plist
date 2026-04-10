@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>me.journely.miniowl</string>
+
+    <key>CFBundleName</key>
+    <string>miniowl</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>miniowl</string>
+
+    <key>CFBundleExecutable</key>
+    <string>miniowl</string>
+
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <!-- Hide from the Dock; run as a menu-bar / background agent. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Shown in the Automation consent prompt when miniowl asks a
+         browser for its current tab URL. See BrowserWatcher (M9). -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>miniowl reads the URL of your browser's active tab so it can honestly log where your time goes. It never reads page content.</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 miniowl contributors. MIT licensed.</string>
+</dict>
+</plist>

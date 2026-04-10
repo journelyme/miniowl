@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Required for BrowserWatcher (M9) — lets miniowl send Apple Events
+        to browsers (Chrome, Safari, Arc, Brave) to read the current tab
+        URL. Each browser still prompts the user individually on first
+        access via the TCC kTCCServiceAppleEvents sheet.
+    -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <!--
+        miniowl does NOT request:
+          - network.client     (Phase 1 is air-gapped)
+          - network.server     (no inbound sockets)
+          - files.user-selected.read-write
+          - device.camera / microphone / etc.
+    -->
+</dict>
+</plist>
