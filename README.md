@@ -85,22 +85,33 @@ The audit surface is small enough that a skeptic can read every line of Swift in
 ### Requirements
 
 - macOS 14 (Sonoma) or later
-- Swift 5.9+ (ships with Xcode 15+, or install via [swift.org](https://www.swift.org/install/macos/)). On a stock Mac without Xcode, you can install just the Command Line Tools with `xcode-select --install`.
 
-### Build from source
+### Option A — download the signed `.dmg` (recommended)
+
+Grab the latest release from the [Releases page](https://github.com/journelyme/miniowl/releases/latest):
+
+1. Download `miniowl-<version>.dmg`
+2. Open the `.dmg`
+3. Drag `miniowl.app` to **Applications**
+4. Open **Applications** → **miniowl**
+
+The `.dmg` is **signed by JOURNELY LLC and notarized by Apple**, so Gatekeeper will not show "unidentified developer" warnings.
+
+### Option B — build from source
+
+Requires Swift 5.9+ (ships with Xcode 15+, or via Command Line Tools — `xcode-select --install`).
 
 ```bash
 git clone https://github.com/journelyme/miniowl.git
 cd miniowl
 ./scripts/build-app.sh
-```
-
-This produces `build/miniowl.app` (~400 KB). Then install it the standard way:
-
-```bash
 cp -R build/miniowl.app /Applications/
 open /Applications/miniowl.app
 ```
+
+`./scripts/build-app.sh` auto-detects a signing identity from your keychain (`Developer ID Application` → `Apple Development` → ad-hoc fallback). For day-to-day local use, ad-hoc is fine — it just means you'll need to re-grant Accessibility after every rebuild because macOS tracks ad-hoc-signed apps by code hash.
+
+### After install
 
 `miniowl` appears as an eye icon in your menu bar (top-right of the screen).
 
@@ -361,6 +372,40 @@ swift run -c release
 # Regenerate the app icon from scratch
 ./tools/make-icon.sh
 ```
+
+### Cutting a release
+
+This is a one-time setup for whoever maintains miniowl. Once it's done, every release is a single command.
+
+#### One-time setup (for the maintainer's machine)
+
+1. Have a paid **Apple Developer Program** membership
+2. In **Keychain Access**, generate a CSR via *Certificate Assistant → Request a Certificate From a Certificate Authority…* and save it to disk
+3. At https://developer.apple.com/account/resources/certificates/list, click **+** → **Developer ID Application** → upload the CSR → download the resulting `.cer` → double-click to install in Keychain Access
+4. At https://appleid.apple.com → **Sign-In and Security → App-Specific Passwords**, generate a new app-specific password (label it `miniowl notarization`) and copy the `xxxx-xxxx-xxxx-xxxx` string
+5. Run `./tools/setup-notary.sh <your-apple-id-email>` and paste the app-specific password when prompted — it gets stored in the macOS keychain under the profile name `miniowl-notary`
+
+#### Cutting a release (every time)
+
+1. Bump `CFBundleShortVersionString` in `miniowl-bundle/Info.plist`
+2. Add an entry under `[Unreleased]` in `CHANGELOG.md` and rename it to the new version
+3. Commit, tag, push:
+   ```bash
+   git commit -am "release v0.1.0"
+   git tag v0.1.0
+   git push origin main --tags
+   ```
+4. Build the signed + notarized `.dmg`:
+   ```bash
+   ./tools/make-dmg.sh
+   ```
+   This runs the privacy check, builds the `.app`, signs it with your Developer ID, packages it into a `.dmg`, signs the `.dmg`, submits it to Apple's notary service, waits for the `Accepted` status, and staples the ticket. Output: `release/miniowl-<version>.dmg`.
+5. Create the GitHub release with the `.dmg` attached:
+   ```bash
+   gh release create v0.1.0 release/miniowl-0.1.0.dmg \
+     --title "miniowl 0.1.0" \
+     --notes-file <(awk '/^## \[0.1.0\]/,/^## \[/ {if (!/^## \[/) print}' CHANGELOG.md)
+   ```
 
 The privacy check is just a `grep` for banned API names. Banned symbols live in [`Sources/miniowl/Privacy/ForbiddenImports.swift`](Sources/miniowl/Privacy/ForbiddenImports.swift) and the script greps the rest of the source tree for them. **If you need to add a new API surface, audit it against the privacy contract first** — and please don't bypass the check.
 
