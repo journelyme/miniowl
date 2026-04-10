@@ -20,14 +20,20 @@ BANNED=(
   "Network.framework"
 )
 
-# Exclude the manifest file itself — it names the banned symbols on purpose.
-EXCLUDE="Sources/miniowl/Privacy/ForbiddenImports.swift"
+# Exclude the manifest file itself — it names the banned symbols on
+# purpose. We use grep's built-in --exclude (matched against the
+# basename) instead of post-filtering by path so this works the same
+# on macOS BSD grep, GNU grep on Linux, and the GitHub Actions runner
+# (which sometimes emits paths with double slashes that defeat string
+# matching against the full path).
+EXCLUDE_BASENAME="ForbiddenImports.swift"
 
 failed=0
 for sym in "${BANNED[@]}"; do
-  # Find any .swift file (excluding the manifest) that contains the symbol.
-  matches=$(grep -rl --include="*.swift" -- "$sym" Sources/ 2>/dev/null \
-            | grep -v -F "$EXCLUDE" || true)
+  matches=$(grep -rl \
+              --include="*.swift" \
+              --exclude="$EXCLUDE_BASENAME" \
+              -- "$sym" Sources 2>/dev/null || true)
   if [[ -n "$matches" ]]; then
     echo "PRIVACY VIOLATION: banned symbol '$sym' found in:"
     echo "$matches" | sed 's/^/    /'
