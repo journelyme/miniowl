@@ -1,8 +1,10 @@
 <div align="center">
-  <img src="assets/icon-256.png" width="160" alt="miniowl app icon" />
+  <img src="assets/icon-256.png" width="140" alt="miniowl app icon" />
   <h1>miniowl</h1>
   <p><strong>A tiny, privacy-first macOS activity tracker that lives in your menu bar.</strong></p>
   <p>~1,500 lines of Swift · zero dependencies · plain JSONL files · no network</p>
+  <br/>
+  <img src="assets/screenshot-popover.png" width="320" alt="miniowl menu bar popover" />
   <p>
     <a href="https://github.com/journelyme/miniowl/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/journelyme/miniowl/actions/workflows/ci.yml/badge.svg" /></a>
     <a href="https://github.com/journelyme/miniowl/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/journelyme/miniowl?label=release" /></a>
@@ -58,29 +60,12 @@ The audit surface is small enough that a skeptic can read every line of Swift in
 - **Compact storage**: ~5–8 KB per day gzipped, ~10–15 MB for five years
 - **Zero third-party dependencies** — only Foundation, AppKit, ApplicationServices, ServiceManagement, SwiftUI
 
-## Screenshots
+## Screenshot
 
 <div align="center">
-  <p><em>(menu bar popover — click the eye icon)</em></p>
+  <img src="assets/screenshot-popover.png" width="320" alt="miniowl menu bar popover showing today's top apps" />
+  <p><em>Click the eye icon in your menu bar to see today's totals live.</em></p>
 </div>
-
-```
-┌─────────────────────────────────┐
-│ ●  miniowl  ·  Tracking         │
-├─────────────────────────────────┤
-│ Today                            │
-│  IntelliJ IDEA          2h 14m  │
-│  Google Chrome          1h 03m  │
-│  Preview                  45m   │
-│  Slack                    28m   │
-│  Terminal                 12m   │
-│  — AFK                    37m   │
-├─────────────────────────────────┤
-│ Pause tracking          ⌘P      │
-│ Open data folder                │
-│ Quit miniowl            ⌘Q      │
-└─────────────────────────────────┘
-```
 
 ## Install
 
