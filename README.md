@@ -42,9 +42,39 @@ These are **code-enforced** invariants. The build fails if any banned API appear
 | Title of the focused window (via the Accessibility API) | Clipboard contents (no `NSPasteboard`) |
 | One number: seconds since last input | Screen pixels (no `CGWindowListCreateImage`, no `ScreenCaptureKit`) |
 | Browser current-tab URL via AppleScript (whitelisted browsers only) | Page content, form data, browsing history |
-| `NSWorkspace` notifications: sleep / wake / lock / unlock | Anything over the network — Phase 1 has zero `URLSession` |
+| `NSWorkspace` notifications: sleep / wake / lock / unlock | — |
 
 The audit surface is small enough that a skeptic can read every line of Swift in under an hour and verify these claims.
+
+### v2.0 (opt-in) — categorization
+
+v2.0 adds an **opt-in** network call: every 20 minutes, miniowl POSTs a compact summary of the window to a categorization API which returns strategic-bucket totals (Product / GTM / Strategy / Learning / Admin / Operations / Personal). Disabled by default; enabled when both `MINIOWL_CATEGORIZE_URL` and `MINIOWL_TOKEN` env vars are set.
+
+**What v2.0 sends** (per call, ~once every 20 minutes, batched):
+
+```jsonc
+{
+  "tz": "Asia/Tokyo",
+  "window_start": 1712739600000,
+  "window_end": 1712740800000,
+  "events": [
+    {
+      "b":  "com.jetbrains.intellij",     // bundle id
+      "n":  "IntelliJ IDEA",              // app display name
+      "ti": "miniowl – CategorizationClient.swift",  // window title (truncated to 120 chars)
+      "u":  null,                          // URL host+first-path (truncated to 120 chars), null unless browser
+      "ms": 480000                         // duration in ms within this window
+    }
+    // ... up to 400 deduped events per call
+  ]
+}
+```
+
+**What v2.0 does NOT send:** keystrokes, clipboard, screen pixels, page content/HTML/text, form data, full URLs (only host + first path segment), file contents, network packets from other apps, anything from outside the existing v1 watchers.
+
+**Allowlisted file:** `URLSession` is allowed in **exactly one file** (`Sources/miniowl/Categorization/CategorizationClient.swift`). The privacy-check script enforces this — any other file that imports `URLSession` fails the build. This keeps the network surface auditable in <50 lines.
+
+**Free vs paid:** v1 (raw local tracking) is **free forever** — never makes a network call. v2 categorization activates only when the user supplies a token. Phase 2a token entry is via env var (`MINIOWL_TOKEN`); Phase 2b will move this to a Settings panel that persists to the macOS Keychain. If no token is set, miniowl shows the v1 raw-app view exactly as before.
 
 ## Features
 
@@ -59,6 +89,7 @@ The audit surface is small enough that a skeptic can read every line of Swift in
 - **Crash recovery** via a 10 s heartbeat to `state.json` — at most 10 seconds of pending work is lost on `kill -9`
 - **Compact storage**: ~5–8 KB per day gzipped, ~10–15 MB for five years
 - **Zero third-party dependencies** — only Foundation, AppKit, ApplicationServices, ServiceManagement, SwiftUI
+- **v2.0 (opt-in) strategic categorization** — every 20 minutes, the window summary is sent to a categorization API which returns founder-strategic bucket totals (Product / GTM / Strategy / Learning / Admin / Operations / Personal) plus a one-line founder-honest summary. Disabled by default. See [Privacy contract → v2.0](#v20-opt-in--categorization).
 
 ## Screenshot
 

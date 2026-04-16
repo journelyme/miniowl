@@ -21,6 +21,12 @@ final class AppState: ObservableObject {
     @Published var summary: DailySummary = .empty
     @Published var loginItemStatus: SMAppService.Status = .notRegistered
 
+    // v2.0 — Categorization state. Nil until the first successful API
+    // call. UI falls back to v1 raw-app view whenever this is nil.
+    @Published var rollup: CachedRollup?
+    @Published var rollupError: String?
+    @Published var showRawApps = false
+
     // ─── Backing ─────────────────────────────────────────────────────
     let dataDir: URL
     let coordinator: EventCoordinator
@@ -33,6 +39,30 @@ final class AppState: ObservableObject {
     private var rotationTimer: DispatchSourceTimer?
     private var permissionTimer: Timer?
     private var summaryTimer: Timer?
+    private var categorizeTimer: DispatchSourceTimer?
+    private var categorizeInflight = false
+
+    /// v2.0 — client config. Re-resolved on demand via `reloadToken()`
+    /// so edits to `token.txt` take effect without an app restart.
+    private var categorizationSettings: CategorizationSettings?
+
+    /// Token file helper — used by the "Edit token" menu action.
+    let tokenStore: TokenStore
+
+    /// Persistent categorization log — mirrors EventLog's JSONL-per-day
+    /// pattern. Rehydrates `rollup` on startup so the menu isn't empty
+    /// after a relaunch.
+    let categorizationLog: CategorizationLog
+
+    /// Cadence for the categorization API call. 20 minutes is the default
+    /// per the product spec; can be overridden via env for development.
+    private let categorizeInterval: TimeInterval = {
+        if let s = ProcessInfo.processInfo.environment["MINIOWL_CATEGORIZE_INTERVAL_S"],
+           let v = TimeInterval(s), v >= 30 {
+            return v
+        }
+        return 20 * 60
+    }()
 
     // ─── Init ────────────────────────────────────────────────────────
     init() {
@@ -64,6 +94,18 @@ final class AppState: ObservableObject {
         )
         self.afkWatcher = AFKWatcher(coordinator: coordinator)
         self.systemWatcher = SystemWatcher(coordinator: coordinator)
+
+        // v2.0 — token file + compile-time URL. Ensure a placeholder
+        // token file exists so the user can find it via "Edit token".
+        self.tokenStore = TokenStore(dataDir: dataDir)
+        tokenStore.initializeIfMissing()
+        self.categorizationSettings = CategorizationSettings.resolve(dataDir: dataDir)
+
+        // v2.0 — persistent categorization log. Prime `rollup` from the
+        // last entry so the menu isn't empty after a restart. Silent
+        // on missing file (first run).
+        self.categorizationLog = CategorizationLog(dataDir: dataDir)
+        self.rollup = categorizationLog.readLatest()
     }
 
     // ─── Lifecycle ───────────────────────────────────────────────────
@@ -85,6 +127,16 @@ final class AppState: ObservableObject {
         startPermissionPolling()
         startSummaryRefresh()
         refreshSummaryNow()
+
+        // v2.0 — start categorization timer if configured. First fire is
+        // delayed by 60s to let the user accumulate at least some data
+        // before the first call.
+        if categorizationSettings != nil {
+            startCategorizeTimer()
+            print("miniowl: categorization enabled (every \(Int(categorizeInterval))s)")
+        } else {
+            print("miniowl: categorization disabled (set MINIOWL_CATEGORIZE_URL + MINIOWL_TOKEN to enable)")
+        }
 
         // SMAppService.register() is synchronous and very fast once the
         // binary is installed; slow only in the "never run before" case
@@ -135,6 +187,44 @@ final class AppState: ObservableObject {
 
     func openLoginItemSettings() {
         SMAppService.openSystemSettingsLoginItems()
+    }
+
+    // ─── v2.0 token management ───────────────────────────────────────
+
+    /// True if a token is currently resolved (file or env var). UI uses
+    /// this to label the menu button and show status.
+    var hasToken: Bool { categorizationSettings != nil }
+
+    /// Human-readable label of the environment this build targets
+    /// ("dev (localhost)" or "production"). Shown in the menu for
+    /// transparency — the user should never be surprised about which
+    /// backend their data goes to.
+    var environmentLabel: String { CategorizationSettings.environmentLabel }
+
+    /// Open the token file in the user's default text editor.
+    func editToken() {
+        tokenStore.openInEditor()
+    }
+
+    /// Re-read the token file after the user saves edits. Immediately
+    /// fires a categorization call so the user can verify the new token
+    /// works without waiting for the 20-minute timer.
+    func reloadToken() {
+        let resolved = CategorizationSettings.resolve(dataDir: dataDir)
+        let wasEnabled = categorizationSettings != nil
+        categorizationSettings = resolved
+
+        if resolved != nil {
+            rollupError = nil
+            // Start the timer if this is the first valid token we've seen.
+            if !wasEnabled && categorizeTimer == nil {
+                startCategorizeTimer()
+            }
+            Task { await runCategorizeOnce() }
+        } else {
+            rollup = nil
+            rollupError = "no token — set one via Edit token"
+        }
     }
 
     // ─── Timers ──────────────────────────────────────────────────────
@@ -199,6 +289,85 @@ final class AppState: ObservableObject {
         }
         RunLoop.main.add(t, forMode: .common)
         summaryTimer = t
+    }
+
+    /// v2.0 — fire the categorization API call on a schedule. First fire
+    /// after 60s; then every `categorizeInterval` (default 20 min). All
+    /// network work happens off-main; the @Published update bounces back
+    /// to main via `await MainActor.run`.
+    private func startCategorizeTimer() {
+        let t = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        t.schedule(
+            deadline: .now() + .seconds(60),
+            repeating: .seconds(Int(categorizeInterval))
+        )
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            Task { await self.runCategorizeOnce() }
+        }
+        t.resume()
+        self.categorizeTimer = t
+    }
+
+    /// One round-trip to the categorization API. No-op if v2 is disabled,
+    /// paused, or another call is in-flight (single-flight semantics).
+    /// Caller-safe to invoke from anywhere; runs on the global queue.
+    func runCategorizeOnce() async {
+        guard let settings = categorizationSettings else { return }
+        if paused { return }
+
+        // Single-flight: bail if a call is already in progress.
+        let alreadyRunning = await MainActor.run { () -> Bool in
+            if categorizeInflight { return true }
+            categorizeInflight = true
+            return false
+        }
+        if alreadyRunning { return }
+        defer {
+            Task { @MainActor in self.categorizeInflight = false }
+        }
+
+        // Build the request from today's on-disk events. If the file is
+        // empty (no activity), skip the call entirely.
+        let today = DateUtils.localDateString(for: Date())
+        let file = dataDir.appendingPathComponent("\(today).mow")
+        guard let req = CategoryRollup.buildRequest(file: file) else {
+            return
+        }
+
+        let client = CategorizationClient(settings: settings)
+        do {
+            let resp = try await client.categorize(req)
+            let cached = CachedRollup(response: resp, computedAt: Date())
+
+            // Persist BEFORE publishing to @Published so a crash between
+            // the two doesn't lose the row. File I/O runs on the current
+            // utility queue (outside the main actor).
+            do {
+                try categorizationLog.append(cached, request: req)
+            } catch {
+                fputs("miniowl: categorization log append failed: \(error)\n", stderr)
+            }
+
+            await MainActor.run {
+                self.rollup = cached
+                self.rollupError = nil
+            }
+        } catch {
+            // Fail-soft: keep showing the last good rollup if any, surface
+            // a one-line error in the UI for transparency.
+            await MainActor.run {
+                self.rollupError = (error as? CategorizationError)?.errorDescription
+                    ?? "\(error)"
+            }
+            fputs("miniowl: categorize failed: \(error)\n", stderr)
+        }
+    }
+
+    /// Called by the menu so the user can force a refresh without waiting
+    /// for the next 20-minute tick.
+    func categorizeNow() {
+        Task { await runCategorizeOnce() }
     }
 
     /// Quit and immediately relaunch /Applications/miniowl.app. The

@@ -28,7 +28,24 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# 0. Privacy gate — fail the build before we waste cycles compiling.
+# 0a. Parse flags.
+#   --dev  → pass -DMINIOWL_DEV so CategorizationClient points at
+#            localhost instead of production. Default = production build.
+BUILD_FLAGS=()
+BUILD_ENV_LABEL="production"
+for arg in "$@"; do
+  case "$arg" in
+    --dev|-dev)
+      BUILD_FLAGS+=("-Xswiftc" "-DMINIOWL_DEV")
+      BUILD_ENV_LABEL="dev (localhost)"
+      ;;
+    *)
+      echo "warning: unknown flag '$arg'" >&2
+      ;;
+  esac
+done
+
+# 0b. Privacy gate — fail the build before we waste cycles compiling.
 ./scripts/check-privacy.sh
 
 # 1. Resolve a signing identity *before* compiling so we can fail
@@ -80,8 +97,8 @@ echo "      kind:   $SIGN_KIND"
 echo ""
 
 # 2. Compile release binary via SPM.
-echo "building miniowl (release)..."
-swift build -c release
+echo "building miniowl (release) [env: $BUILD_ENV_LABEL]..."
+swift build -c release "${BUILD_FLAGS[@]}"
 
 BIN=".build/release/miniowl"
 APP="build/miniowl.app"

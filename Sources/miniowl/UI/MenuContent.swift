@@ -47,6 +47,11 @@ struct MenuContent: View {
             Text(state.paused ? "Paused" : "Tracking")
                 .foregroundStyle(.secondary)
             Spacer()
+            // Build-env label — always visible so the user knows
+            // whether their data is going to localhost or production.
+            Text(state.environmentLabel)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
         }
         .font(.system(size: 13))
     }
@@ -78,10 +83,44 @@ struct MenuContent: View {
 
     private var todayBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Today")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            TodaySummaryView(summary: state.summary)
+            HStack {
+                Text(state.showRawApps || state.rollup == nil ? "Today — apps" : "Today — categories")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // Toggle only meaningful once we have categorized data.
+                if state.rollup != nil {
+                    Button(state.showRawApps ? "Show categories" : "Show raw apps") {
+                        state.showRawApps.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                }
+            }
+
+            if state.showRawApps {
+                TodaySummaryView(summary: state.summary)
+            } else if let cached = state.rollup {
+                CategoryBarsView(
+                    cached: cached,
+                    totalActiveMs: state.summary.totalActiveMs
+                )
+            } else {
+                // Default: v1 view until first categorization completes.
+                TodaySummaryView(summary: state.summary)
+                if let err = state.rollupError {
+                    Text("Categorization: \(err)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                } else {
+                    Text("Waiting for first categorization (every 20 min)…")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
         }
     }
 
@@ -97,6 +136,32 @@ struct MenuContent: View {
 
             Button("Open data folder") {
                 state.openDataFolder()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // v2.0 — manual refresh of categories (skips the 20-min wait).
+            // Only meaningful if a token is configured.
+            if state.hasToken {
+                Button("Categorize now") {
+                    state.categorizeNow()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // v2.0 — token management.
+            Button(state.hasToken ? "Edit token…" : "Set token…") {
+                state.editToken()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Reload token") {
+                state.reloadToken()
             }
             .buttonStyle(.plain)
             .font(.system(size: 12))
