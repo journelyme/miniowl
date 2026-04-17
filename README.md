@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/icon-256.png" width="140" alt="miniowl app icon" />
-  <h1>miniowl</h1>
+  <img src="assets/icon-256.png" width="140" alt="Miniowl app icon" />
+  <h1>Miniowl</h1>
   <p><strong>A tiny, privacy-first macOS activity tracker that lives in your menu bar.</strong></p>
   <p>~1,500 lines of Swift · zero dependencies · plain JSONL files · no network</p>
   <br/>
@@ -21,7 +21,7 @@
 
 miniowl is a small macOS app that quietly records which application has focus, what its window title is, when you're at the keyboard versus away, and (for whitelisted browsers) the URL of your current tab. It writes everything to a plain JSON-Lines file under `~/Library/Application Support/miniowl/`. Nothing leaves your Mac. The whole source tree is around 1,500 lines of Swift you can read in one sitting.
 
-It exists because **the only honest way to know where your time goes is to measure it**. Self-reports are flattering and inaccurate. Calendars are aspirational. miniowl just records what actually happened.
+It exists because **the only honest way to know where your time goes is to measure it**. Self-reports are flattering and inaccurate. Calendars are aspirational. Miniowl just records what actually happened.
 
 ## Why you might want it
 
@@ -30,7 +30,7 @@ It exists because **the only honest way to know where your time goes is to measu
 - You don't want a SaaS time tracker reading your screen, syncing to a server, or showing you a dashboard designed to keep you engaged.
 - You want a small, single-binary tool you can audit, fork, and modify in an afternoon.
 
-If those don't resonate, you probably want something else — RescueTime, Toggl, Timing, or ActivityWatch are all good. miniowl is deliberately the opposite of "fully featured."
+If those don't resonate, you probably want something else — RescueTime, Toggl, Timing, or ActivityWatch are all good. Miniowl is deliberately the opposite of "fully featured."
 
 ## Privacy contract
 
@@ -42,9 +42,39 @@ These are **code-enforced** invariants. The build fails if any banned API appear
 | Title of the focused window (via the Accessibility API) | Clipboard contents (no `NSPasteboard`) |
 | One number: seconds since last input | Screen pixels (no `CGWindowListCreateImage`, no `ScreenCaptureKit`) |
 | Browser current-tab URL via AppleScript (whitelisted browsers only) | Page content, form data, browsing history |
-| `NSWorkspace` notifications: sleep / wake / lock / unlock | Anything over the network — Phase 1 has zero `URLSession` |
+| `NSWorkspace` notifications: sleep / wake / lock / unlock | — |
 
 The audit surface is small enough that a skeptic can read every line of Swift in under an hour and verify these claims.
+
+### v2.0 (opt-in) — categorization
+
+v2.0 adds an **opt-in** network call: every 20 minutes, miniowl POSTs a compact summary of the window to a categorization API which returns strategic-bucket totals (Product / GTM / Strategy / Learning / Admin / Operations / Personal). Disabled by default; enabled when both `MINIOWL_CATEGORIZE_URL` and `MINIOWL_TOKEN` env vars are set.
+
+**What v2.0 sends** (per call, ~once every 20 minutes, batched):
+
+```jsonc
+{
+  "tz": "Asia/Tokyo",
+  "window_start": 1712739600000,
+  "window_end": 1712740800000,
+  "events": [
+    {
+      "b":  "com.jetbrains.intellij",     // bundle id
+      "n":  "IntelliJ IDEA",              // app display name
+      "ti": "miniowl – CategorizationClient.swift",  // window title (truncated to 120 chars)
+      "u":  null,                          // URL host+first-path (truncated to 120 chars), null unless browser
+      "ms": 480000                         // duration in ms within this window
+    }
+    // ... up to 400 deduped events per call
+  ]
+}
+```
+
+**What v2.0 does NOT send:** keystrokes, clipboard, screen pixels, page content/HTML/text, form data, full URLs (only host + first path segment), file contents, network packets from other apps, anything from outside the existing v1 watchers.
+
+**Allowlisted file:** `URLSession` is allowed in **exactly one file** (`Sources/miniowl/Categorization/CategorizationClient.swift`). The privacy-check script enforces this — any other file that imports `URLSession` fails the build. This keeps the network surface auditable in <50 lines.
+
+**Free vs paid:** v1 (raw local tracking) is **free forever** — never makes a network call. v2 categorization activates only when the user supplies a token. Phase 2a token entry is via env var (`MINIOWL_TOKEN`); Phase 2b will move this to a Settings panel that persists to the macOS Keychain. If no token is set, miniowl shows the v1 raw-app view exactly as before.
 
 ## Features
 
@@ -59,12 +89,13 @@ The audit surface is small enough that a skeptic can read every line of Swift in
 - **Crash recovery** via a 10 s heartbeat to `state.json` — at most 10 seconds of pending work is lost on `kill -9`
 - **Compact storage**: ~5–8 KB per day gzipped, ~10–15 MB for five years
 - **Zero third-party dependencies** — only Foundation, AppKit, ApplicationServices, ServiceManagement, SwiftUI
+- **v2.0 (opt-in) strategic categorization** — every 20 minutes, the window summary is sent to a categorization API which returns founder-strategic bucket totals (Product / GTM / Strategy / Learning / Admin / Operations / Personal) plus a one-line founder-honest summary. Disabled by default. See [Privacy contract → v2.0](#v20-opt-in--categorization).
 
 ## Screenshot
 
 <div align="center">
   <img src="assets/screenshot-popover.png" width="320" alt="miniowl menu bar popover showing today's top apps" />
-  <p><em>Click the eye icon in your menu bar to see today's totals live.</em></p>
+  <p><em>Click the owl icon in your menu bar to see today's totals live.</em></p>
 </div>
 
 ## Install
@@ -126,7 +157,7 @@ Click **OK**. miniowl uses this only to read the URL of the active tab via Apple
 
 ### 3. Login items (so miniowl auto-starts at login)
 
-miniowl calls `SMAppService.mainApp.register()` on first launch. macOS may show a prompt; you can also verify (or toggle) it manually under **System Settings → General → Login Items & Extensions → Open at Login**.
+Miniowl calls `SMAppService.mainApp.register()` on first launch. macOS may show a prompt; you can also verify (or toggle) it manually under **System Settings → General → Login Items & Extensions → Open at Login**.
 
 ## Querying your data
 
@@ -140,7 +171,7 @@ There is no dashboard, by design. Today's data lives at `~/Library/Application S
 Sample output:
 
 ```
-miniowl — 2026-04-10
+Miniowl — 2026-04-10
 ─────────────────────────────────────
 
 Top apps by active time

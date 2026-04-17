@@ -28,7 +28,24 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# 0. Privacy gate — fail the build before we waste cycles compiling.
+# 0a. Parse flags.
+#   --dev  → pass -DMINIOWL_DEV so CategorizationClient points at
+#            localhost instead of production. Default = production build.
+BUILD_FLAGS=()
+BUILD_ENV_LABEL="production"
+for arg in "$@"; do
+  case "$arg" in
+    --dev|-dev)
+      BUILD_FLAGS+=("-Xswiftc" "-DMINIOWL_DEV")
+      BUILD_ENV_LABEL="dev (localhost)"
+      ;;
+    *)
+      echo "warning: unknown flag '$arg'" >&2
+      ;;
+  esac
+done
+
+# 0b. Privacy gate — fail the build before we waste cycles compiling.
 ./scripts/check-privacy.sh
 
 # 1. Resolve a signing identity *before* compiling so we can fail
@@ -80,8 +97,12 @@ echo "      kind:   $SIGN_KIND"
 echo ""
 
 # 2. Compile release binary via SPM.
-echo "building miniowl (release)..."
-swift build -c release
+echo "building miniowl (release) [env: $BUILD_ENV_LABEL]..."
+if [[ ${#BUILD_FLAGS[@]} -gt 0 ]]; then
+  swift build -c release "${BUILD_FLAGS[@]}"
+else
+  swift build -c release
+fi
 
 BIN=".build/release/miniowl"
 APP="build/miniowl.app"
@@ -104,6 +125,12 @@ cp miniowl-bundle/Info.plist "$APP/Contents/Info.plist"
 if [[ -f miniowl-bundle/AppIcon.icns ]]; then
   cp miniowl-bundle/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
+# Menu bar template icons (owl face, adapts to light/dark automatically).
+for icon in MenuBarIcon.png MenuBarIcon-paused.png; do
+  if [[ -f "miniowl-bundle/$icon" ]]; then
+    cp "miniowl-bundle/$icon" "$APP/Contents/Resources/$icon"
+  fi
+done
 
 # 4. Sign with the resolved identity. --identifier locks in the bundle
 #    ID at signing time so codesign doesn't have to derive it from the
