@@ -98,7 +98,11 @@ echo ""
 
 # 2. Compile release binary via SPM.
 echo "building miniowl (release) [env: $BUILD_ENV_LABEL]..."
-swift build -c release "${BUILD_FLAGS[@]}"
+if [[ ${#BUILD_FLAGS[@]} -gt 0 ]]; then
+  swift build -c release "${BUILD_FLAGS[@]}"
+else
+  swift build -c release
+fi
 
 BIN=".build/release/miniowl"
 APP="build/miniowl.app"

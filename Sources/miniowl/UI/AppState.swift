@@ -150,12 +150,8 @@ final class AppState: ObservableObject {
         // Debug breadcrumb so we can verify start() actually ran even
         // when the binary's stdout isn't visible (e.g. when launched
         // via `open`).
-        let breadcrumb = "miniowl start() at \(Date())\n"
-        try? breadcrumb.write(
-            toFile: "/tmp/miniowl-debug.log",
-            atomically: true,
-            encoding: .utf8
-        )
+        // Debug breadcrumb removed for production. Was writing to
+        // /tmp/miniowl-debug.log — unnecessary and leaks launch time.
 
         print("miniowl: tracking started")
         print("miniowl: data dir → \(dataDir.path)")
