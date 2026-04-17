@@ -60,11 +60,17 @@ struct CategoryBarsView: View {
             }
 
             // Footer: when last categorized.
+            // Uses SwiftUI's built-in relative date formatter which
+            // auto-updates its own timer — no manual refresh needed.
             HStack {
                 Spacer()
-                Text("Categorized \(Self.timeAgo(day.lastCategorizedAt))")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 2) {
+                    Text("Categorized")
+                    Text(day.lastCategorizedAt, style: .relative)
+                    Text("ago")
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
             }
         }
     }
@@ -78,15 +84,6 @@ struct CategoryBarsView: View {
         case .personal:  return .blue
         case .neutral:   return .gray
         }
-    }
-
-    static func timeAgo(_ date: Date) -> String {
-        let secs = Int(Date().timeIntervalSince(date))
-        if secs < 60 { return "\(max(secs, 1))s ago" }
-        let mins = secs / 60
-        if mins < 60 { return "\(mins)m ago" }
-        let hrs = mins / 60
-        return "\(hrs)h ago"
     }
 }
 

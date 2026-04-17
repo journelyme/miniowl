@@ -47,11 +47,11 @@ struct MenuContent: View {
             Text(state.paused ? "Paused" : "Tracking")
                 .foregroundStyle(.secondary)
             Spacer()
-            // Build-env label — always visible so the user knows
-            // whether their data is going to localhost or production.
+            #if MINIOWL_DEV
             Text(state.environmentLabel)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
+            #endif
         }
         .font(.system(size: 13))
     }
