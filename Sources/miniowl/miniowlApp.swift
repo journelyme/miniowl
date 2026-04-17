@@ -21,9 +21,17 @@ struct MiniowlApp: App {
             MenuContent()
                 .environmentObject(appDelegate.state)
         } label: {
-            // Rendered in the menu bar. Template-rendered so it adapts
-            // to the user's light/dark appearance automatically.
-            Image(systemName: appDelegate.state.paused ? "eye.slash" : "eye")
+            // Custom owl icon rendered as template so macOS adapts the
+            // color to the menu bar appearance (dark bar → white icon,
+            // light bar → dark icon) automatically.
+            let iconName = appDelegate.state.paused ? "MenuBarIcon-paused" : "MenuBarIcon"
+            if let img = loadMenuBarIcon(named: iconName) {
+                Image(nsImage: img)
+            } else {
+                // Fallback to SF Symbol if bundled icon is missing
+                // (e.g. during `swift run` without a full .app bundle).
+                Image(systemName: appDelegate.state.paused ? "eye.slash" : "eye")
+            }
         }
         .menuBarExtraStyle(.window)
     }
@@ -61,4 +69,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         src.resume()
         signalSources.append(src)
     }
+}
+
+// MARK: - Menu bar icon loader
+
+/// Load a PNG from the app bundle's Resources directory and configure it
+/// as a template image (single-color, macOS adapts to light/dark bar).
+/// Size is set to 18×18 pt so it matches standard menu bar icon dimensions.
+func loadMenuBarIcon(named name: String) -> NSImage? {
+    guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+          let img = NSImage(contentsOf: url) else {
+        return nil
+    }
+    img.isTemplate = true
+    img.size = NSSize(width: 18, height: 18)
+    return img
 }

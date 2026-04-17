@@ -1,38 +1,68 @@
 import SwiftUI
 
-/// v2.0 — Category roll-up view for the menu bar.
+/// v2.0 — Cumulative day-level category view for the menu bar.
 ///
-/// Renders bars per category, with color = 3-circles failure-mode palette,
-/// and the LLM-generated one-line summary below. Designed to be readable
-/// in <1 second — bars + percentages, nothing else above the fold.
+/// PRIMARY view: shows the entire day's allocation ("where is my day
+/// going?") — the real 3-circles honesty meter.
+///
+/// Secondary: the last-window LLM summary is shown as a compact one-liner
+/// below the cumulative bars ("what just happened?").
 struct CategoryBarsView: View {
-    let cached: CachedRollup
-    let totalActiveMs: Int64
+    let day: DayCategorization
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Bars — sorted server-side by ms desc.
-            ForEach(cached.response.categories) { bucket in
+            // Day header: total time + window count
+            HStack {
+                Text("Today")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text("\(TodaySummaryView.formatDuration(day.totalActiveMs)) active")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text("\(day.windowCount) windows")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+
+            // Cumulative category bars — the whole-day picture.
+            ForEach(day.categories) { bucket in
                 CategoryBarRow(
                     bucket: bucket,
                     color: color(for: bucket.name)
                 )
             }
 
-            // Founder-honest summary line. The whole product is about
-            // putting friction at the moment of choice; this is that line.
-            if !cached.response.summary.isEmpty {
-                Text("ⓘ  \(cached.response.summary)")
+            // Cumulative summary — template-computed, no LLM.
+            // This is the 3-circles diagnostic ("62% Product, 15% GTM —
+            // Joy+Skill pattern.").
+            if day.totalActiveMs > 0 {
+                Text("ⓘ  \(day.cumulativeSummary)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+                    .padding(.top, 2)
             }
 
-            // Footer: when categorized.
+            // Last-window LLM summary — what the model said about the
+            // most recent 20-min chunk. Secondary signal.
+            if !day.lastWindowSummary.isEmpty {
+                Text("Last window: \(day.lastWindowSummary)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 1)
+            }
+
+            // Footer: when last categorized.
             HStack {
                 Spacer()
-                Text("Categorized \(Self.timeAgo(cached.computedAt))")
+                Text("Categorized \(Self.timeAgo(day.lastCategorizedAt))")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -50,7 +80,6 @@ struct CategoryBarsView: View {
         }
     }
 
-    /// "12s ago", "4m ago", "1h ago" — keep it terse.
     static func timeAgo(_ date: Date) -> String {
         let secs = Int(Date().timeIntervalSince(date))
         if secs < 60 { return "\(max(secs, 1))s ago" }

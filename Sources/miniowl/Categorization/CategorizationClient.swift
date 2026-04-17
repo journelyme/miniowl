@@ -99,7 +99,7 @@ struct CategorizationClient {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue(settings.token, forHTTPHeaderField: "X-Internal-Secret")
-        urlRequest.setValue("miniowl/2.0", forHTTPHeaderField: "User-Agent")
+        urlRequest.setValue("Miniowl/2.0", forHTTPHeaderField: "User-Agent")
 
         do {
             urlRequest.httpBody = try JSONEncoder().encode(request)

@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/icon-256.png" width="140" alt="miniowl app icon" />
-  <h1>miniowl</h1>
+  <img src="assets/icon-256.png" width="140" alt="Miniowl app icon" />
+  <h1>Miniowl</h1>
   <p><strong>A tiny, privacy-first macOS activity tracker that lives in your menu bar.</strong></p>
   <p>~1,500 lines of Swift · zero dependencies · plain JSONL files · no network</p>
   <br/>
@@ -21,7 +21,7 @@
 
 miniowl is a small macOS app that quietly records which application has focus, what its window title is, when you're at the keyboard versus away, and (for whitelisted browsers) the URL of your current tab. It writes everything to a plain JSON-Lines file under `~/Library/Application Support/miniowl/`. Nothing leaves your Mac. The whole source tree is around 1,500 lines of Swift you can read in one sitting.
 
-It exists because **the only honest way to know where your time goes is to measure it**. Self-reports are flattering and inaccurate. Calendars are aspirational. miniowl just records what actually happened.
+It exists because **the only honest way to know where your time goes is to measure it**. Self-reports are flattering and inaccurate. Calendars are aspirational. Miniowl just records what actually happened.
 
 ## Why you might want it
 
@@ -30,7 +30,7 @@ It exists because **the only honest way to know where your time goes is to measu
 - You don't want a SaaS time tracker reading your screen, syncing to a server, or showing you a dashboard designed to keep you engaged.
 - You want a small, single-binary tool you can audit, fork, and modify in an afternoon.
 
-If those don't resonate, you probably want something else — RescueTime, Toggl, Timing, or ActivityWatch are all good. miniowl is deliberately the opposite of "fully featured."
+If those don't resonate, you probably want something else — RescueTime, Toggl, Timing, or ActivityWatch are all good. Miniowl is deliberately the opposite of "fully featured."
 
 ## Privacy contract
 
@@ -95,7 +95,7 @@ v2.0 adds an **opt-in** network call: every 20 minutes, miniowl POSTs a compact 
 
 <div align="center">
   <img src="assets/screenshot-popover.png" width="320" alt="miniowl menu bar popover showing today's top apps" />
-  <p><em>Click the eye icon in your menu bar to see today's totals live.</em></p>
+  <p><em>Click the owl icon in your menu bar to see today's totals live.</em></p>
 </div>
 
 ## Install
@@ -157,7 +157,7 @@ Click **OK**. miniowl uses this only to read the URL of the active tab via Apple
 
 ### 3. Login items (so miniowl auto-starts at login)
 
-miniowl calls `SMAppService.mainApp.register()` on first launch. macOS may show a prompt; you can also verify (or toggle) it manually under **System Settings → General → Login Items & Extensions → Open at Login**.
+Miniowl calls `SMAppService.mainApp.register()` on first launch. macOS may show a prompt; you can also verify (or toggle) it manually under **System Settings → General → Login Items & Extensions → Open at Login**.
 
 ## Querying your data
 
@@ -171,7 +171,7 @@ There is no dashboard, by design. Today's data lives at `~/Library/Application S
 Sample output:
 
 ```
-miniowl — 2026-04-10
+Miniowl — 2026-04-10
 ─────────────────────────────────────
 
 Top apps by active time

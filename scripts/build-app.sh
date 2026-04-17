@@ -121,6 +121,12 @@ cp miniowl-bundle/Info.plist "$APP/Contents/Info.plist"
 if [[ -f miniowl-bundle/AppIcon.icns ]]; then
   cp miniowl-bundle/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
+# Menu bar template icons (owl face, adapts to light/dark automatically).
+for icon in MenuBarIcon.png MenuBarIcon-paused.png; do
+  if [[ -f "miniowl-bundle/$icon" ]]; then
+    cp "miniowl-bundle/$icon" "$APP/Contents/Resources/$icon"
+  fi
+done
 
 # 4. Sign with the resolved identity. --identifier locks in the bundle
 #    ID at signing time so codesign doesn't have to derive it from the

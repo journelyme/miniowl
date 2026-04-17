@@ -123,6 +123,57 @@ struct CategorizationLog {
         return nil
     }
 
+    // MARK: - Day aggregation
+
+    /// Read ALL entries from today's `.cats.jsonl` and aggregate into a
+    /// cumulative day view. This is the primary menu bar display — "where
+    /// am I spending my day?" vs the 20-min window's "what just happened?"
+    ///
+    /// Cost: ~35 KB file scan, ~1 ms. Called on each new rollup + on
+    /// startup. Safe from the main thread.
+    func readToday() -> DayCategorization? {
+        let url = fileURL(for: Date())
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let lines = data.split(separator: 0x0A, omittingEmptySubsequences: true)
+        if lines.isEmpty { return nil }
+
+        var totals: [String: Int64] = [:]
+        var lastSummary = ""
+        var lastAt: Int64 = 0
+        var count = 0
+
+        for line in lines {
+            guard let entry = try? JSONDecoder().decode(Entry.self, from: Data(line)) else {
+                continue
+            }
+            for cat in entry.categories {
+                totals[cat.name, default: 0] += Int64(cat.ms)
+            }
+            lastSummary = entry.summary
+            if entry.at > lastAt { lastAt = entry.at }
+            count += 1
+        }
+
+        if totals.isEmpty { return nil }
+
+        let totalMs = totals.values.reduce(0 as Int64, +)
+        let categories = totals.map { name, ms in
+            CategoryBucket(
+                name: name,
+                ms: ms,
+                pct: totalMs > 0 ? Int(Double(ms) / Double(totalMs) * 100) : 0
+            )
+        }.sorted { $0.ms > $1.ms }
+
+        return DayCategorization(
+            categories: categories,
+            totalActiveMs: totalMs,
+            windowCount: count,
+            lastWindowSummary: lastSummary,
+            lastCategorizedAt: Date(timeIntervalSince1970: Double(lastAt) / 1000)
+        )
+    }
+
     // MARK: - Helpers
 
     /// Read the last non-empty line and decode it as an Entry.

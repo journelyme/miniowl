@@ -21,8 +21,11 @@ final class AppState: ObservableObject {
     @Published var summary: DailySummary = .empty
     @Published var loginItemStatus: SMAppService.Status = .notRegistered
 
-    // v2.0 — Categorization state. Nil until the first successful API
-    // call. UI falls back to v1 raw-app view whenever this is nil.
+    // v2.0 — Categorization state.
+    // `dayCategorization` is the PRIMARY view (cumulative day totals).
+    // `rollup` is the LATEST 20-min window (secondary / detail).
+    // UI falls back to v1 raw-app view when both are nil.
+    @Published var dayCategorization: DayCategorization?
     @Published var rollup: CachedRollup?
     @Published var rollupError: String?
     @Published var showRawApps = false
@@ -106,6 +109,7 @@ final class AppState: ObservableObject {
         // on missing file (first run).
         self.categorizationLog = CategorizationLog(dataDir: dataDir)
         self.rollup = categorizationLog.readLatest()
+        self.dayCategorization = categorizationLog.readToday()
     }
 
     // ─── Lifecycle ───────────────────────────────────────────────────
@@ -349,8 +353,12 @@ final class AppState: ObservableObject {
                 fputs("miniowl: categorization log append failed: \(error)\n", stderr)
             }
 
+            // Recompute cumulative day totals from ALL today's entries.
+            let dayData = categorizationLog.readToday()
+
             await MainActor.run {
                 self.rollup = cached
+                self.dayCategorization = dayData
                 self.rollupError = nil
             }
         } catch {
