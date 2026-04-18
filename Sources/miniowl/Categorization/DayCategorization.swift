@@ -23,11 +23,24 @@ struct DayCategorization: Equatable {
     ///   - Diagnostic, not prescriptive
     ///   - Founder-tribal vocabulary
     ///   - Honest at the cost of polish
+    /// True if today is Saturday or Sunday in the user's local timezone.
+    /// Used to soften the summary — weekends aren't work days.
+    private static var isWeekend: Bool {
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        return weekday == 1 || weekday == 7 // 1=Sunday, 7=Saturday
+    }
+
     var cumulativeSummary: String {
         guard totalActiveMs > 0 else { return "No categorized time yet today." }
 
         let totalHours = Double(totalActiveMs) / 3_600_000.0
         let timeLabel = TodaySummaryView.formatDuration(totalActiveMs)
+
+        // Weekend: show bars but no judgment. Rest is not avoidance.
+        if Self.isWeekend {
+            let top = categories.first
+            return "\(timeLabel) tracked — weekend. \(top?.name ?? "Rest") \(top?.pct ?? 0)%. Enjoy."
+        }
 
         let pctByName: [String: Int] = Dictionary(
             uniqueKeysWithValues: categories.map { ($0.name, $0.pct) }
@@ -40,6 +53,7 @@ struct DayCategorization: Equatable {
         let adminPct = (pctByName["Admin", default: 0]) + (pctByName["Operations", default: 0])
 
         // Dispatch rules — ordered by severity. First match wins.
+        // These only fire on weekdays (Mon-Fri).
 
         // 1. Very short day — not enough signal.
         if totalHours < 0.5 {
