@@ -2,7 +2,7 @@ import Foundation
 
 /// Cumulative day-level category totals, aggregated from all 20-min
 /// windows in today's `.cats.jsonl`. This is the PRIMARY view — the
-/// whole-day 3-circles picture the founder needs at 3pm.
+/// whole-day picture the founder needs at 3pm.
 struct DayCategorization: Equatable {
     /// Per-category totals across the entire day, sorted by ms desc.
     let categories: [CategoryBucket]
@@ -12,87 +12,34 @@ struct DayCategorization: Equatable {
     let windowCount: Int
     /// The LLM-generated summary from the LATEST window (for "what just happened").
     let lastWindowSummary: String
+    /// LLM-generated summary of the WHOLE DAY so far. Natural, fresh every
+    /// 20 minutes — not a hardcoded template.
+    let daySummary: String?
     /// When the most recent categorization fired.
     let lastCategorizedAt: Date
 
-    /// Template-computed day-level summary. No LLM call needed — uses
-    /// the cumulative numbers to generate a founder-honest one-liner.
-    ///
-    /// Voice rules (same as the LLM prompt):
-    ///   - Specific, not generic
-    ///   - Diagnostic, not prescriptive
-    ///   - Founder-tribal vocabulary
-    ///   - Honest at the cost of polish
-    /// True if today is Saturday or Sunday in the user's local timezone.
-    /// Used to soften the summary — weekends aren't work days.
-    private static var isWeekend: Bool {
-        let weekday = Calendar.current.component(.weekday, from: Date())
-        return weekday == 1 || weekday == 7 // 1=Sunday, 7=Saturday
+    /// What the UI shows as the day summary. Falls back to a simple
+    /// time label if the LLM hasn't returned a day_summary yet
+    /// (first window of the day, or server didn't include it).
+    /// Numbers prefix: computed from real data, always matches the bars.
+    /// e.g. "6h 19m — Learning 46%, Product 13%."
+    var numbersLine: String {
+        guard totalActiveMs > 0 else { return "" }
+        let timeLabel = TodaySummaryView.formatDuration(totalActiveMs)
+        let topCategories = categories.prefix(3)
+            .map { "\($0.name) \($0.pct)%" }
+            .joined(separator: ", ")
+        return "\(timeLabel) — \(topCategories)."
     }
 
-    var cumulativeSummary: String {
+    /// Combined display: code-computed numbers + LLM qualitative text.
+    /// Numbers always match the bars. Voice is always natural.
+    var displayDaySummary: String {
         guard totalActiveMs > 0 else { return "No categorized time yet today." }
-
-        let totalHours = Double(totalActiveMs) / 3_600_000.0
-        let timeLabel = TodaySummaryView.formatDuration(totalActiveMs)
-
-        // Weekend: show bars but no judgment. Rest is not avoidance.
-        if Self.isWeekend {
-            let top = categories.first
-            return "\(timeLabel) tracked — weekend. \(top?.name ?? "Rest") \(top?.pct ?? 0)%. Enjoy."
+        if let ds = daySummary, !ds.isEmpty {
+            return "\(numbersLine) \(ds)"
         }
-
-        let pctByName: [String: Int] = Dictionary(
-            uniqueKeysWithValues: categories.map { ($0.name, $0.pct) }
-        )
-
-        let productPct = pctByName["Product", default: 0]
-        let gtmPct = pctByName["GTM", default: 0]
-        let learningPct = pctByName["Learning", default: 0]
-        let personalPct = pctByName["Personal", default: 0]
-        let adminPct = (pctByName["Admin", default: 0]) + (pctByName["Operations", default: 0])
-
-        // Dispatch rules — ordered by severity. First match wins.
-        // These only fire on weekdays (Mon-Fri).
-
-        // 1. Very short day — not enough signal.
-        if totalHours < 0.5 {
-            return "\(timeLabel) tracked — too early for a pattern."
-        }
-
-        // 2. Heavy Product + low GTM — the Joy+Skill trap (the #1 thing to detect).
-        if productPct > 55 && gtmPct < 15 {
-            return "\(timeLabel) active — \(productPct)% Product, \(gtmPct)% GTM. Joy+Skill pattern."
-        }
-
-        // 3. Heavy Product but GTM present — better.
-        if productPct > 50 && gtmPct >= 15 {
-            return "\(timeLabel) active — \(productPct)% Product, \(gtmPct)% GTM. Product-heavy but GTM present."
-        }
-
-        // 4. GTM-heavy day — rare and worth celebrating.
-        if gtmPct > 35 {
-            return "\(timeLabel) active — \(gtmPct)% GTM. Strong outreach day."
-        }
-
-        // 5. Too much Learning (avoidance dressed as preparation).
-        if learningPct > 30 {
-            return "\(timeLabel) active — \(learningPct)% Learning. Are you preparing or avoiding?"
-        }
-
-        // 6. Too much Admin/Ops overhead.
-        if adminPct > 30 {
-            return "\(timeLabel) active — \(adminPct)% Admin+Ops. Overhead day."
-        }
-
-        // 7. High Personal (fine on a rest day, flag on a work day).
-        if personalPct > 40 {
-            return "\(timeLabel) active — \(personalPct)% Personal. Rest day?"
-        }
-
-        // 8. Balanced — no single bucket dominates.
-        let top = categories.first
-        return "\(timeLabel) active — \(top?.name ?? "mixed") \(top?.pct ?? 0)%. Balanced day."
+        return "\(numbersLine)"
     }
 
     static let empty = DayCategorization(
@@ -100,6 +47,7 @@ struct DayCategorization: Equatable {
         totalActiveMs: 0,
         windowCount: 0,
         lastWindowSummary: "",
+        daySummary: nil,
         lastCategorizedAt: .distantPast
     )
 }

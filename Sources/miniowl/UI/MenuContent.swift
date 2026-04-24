@@ -25,11 +25,9 @@ struct MenuContent: View {
         .padding(12)
         .frame(width: 280)
         .onAppear {
-            // The polling timer might be paused or have a stale cache;
-            // re-check directly so the user's first click after granting
-            // permission flips the banner immediately.
             state.recheckAccessibilityPermission()
             state.refreshSummaryNow()
+            state.refreshDayCategorization()
         }
     }
 
@@ -155,7 +153,8 @@ struct MenuContent: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // v2.0 — token management.
+            // v2.0 — token + context. Both files are read fresh from
+            // disk on every categorize call; no reload button needed.
             Button(state.hasToken ? "Edit token…" : "Set token…") {
                 state.editToken()
             }
@@ -163,8 +162,8 @@ struct MenuContent: View {
             .font(.system(size: 12))
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Reload token") {
-                state.reloadToken()
+            Button("Edit context…") {
+                state.editContext()
             }
             .buttonStyle(.plain)
             .font(.system(size: 12))

@@ -41,12 +41,11 @@ struct TokenStore {
         if FileManager.default.fileExists(atPath: fileURL.path) { return }
 
         let placeholder = """
-        # Paste your miniowl categorization token below this header.
+        # Paste your Miniowl categorization token below this header.
         # Everything on lines starting with `#` is ignored.
         # Empty file = categorization disabled, v1 raw-app view only.
         #
-        # In Phase 2a (testing), Trung shares a token directly.
-        # In Phase 2b, you'll generate one on the miniowl web signup page.
+        # Get your token from the Miniowl web signup page.
         """
         try? placeholder.write(to: fileURL, atomically: true, encoding: .utf8)
     }

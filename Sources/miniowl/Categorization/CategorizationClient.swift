@@ -34,15 +34,11 @@ enum CategorizationError: Error, LocalizedError {
     }
 }
 
-/// Settings for the categorization client.
-///
-/// URL is compile-time: `#if MINIOWL_DEV` → localhost, else production.
-/// Token is runtime: read from `token.txt` in the data dir, or the
-/// `MINIOWL_TOKEN` env var (for CI / swift run).
+/// Static settings: the API URL (compile-time) and environment label.
+/// Token and user context are resolved PER-REQUEST inside the client —
+/// not cached — so edits to `token.txt` / `context.md` take effect on
+/// the very next categorize call without any reload button.
 struct CategorizationSettings {
-    let endpoint: URL
-    let token: String
-
     /// Compile-time API URL. Flipped by the `-DMINIOWL_DEV` flag in
     /// `scripts/build-app.sh --dev`. Default = production.
     static var apiURL: URL {
@@ -62,47 +58,78 @@ struct CategorizationSettings {
         #endif
     }
 
-    /// Resolve settings. Returns nil if no token is available — caller
-    /// treats that as "v2.0 disabled, show v1 raw view".
-    ///
-    /// Token resolution order:
-    ///   1. `MINIOWL_TOKEN` env var (for `swift run` / CI)
-    ///   2. `~/Library/Application Support/miniowl/token.txt` (production path)
-    static func resolve(dataDir: URL) -> CategorizationSettings? {
+    /// Resolve the current token from env var OR the token file. Called
+    /// on EVERY categorize request — ~1ms file read, negligible at 20m
+    /// cadence. Returns nil if no token is set (caller treats as
+    /// "categorization disabled, fall back to v1 view").
+    static func currentToken(dataDir: URL) -> String? {
         if let envToken = ProcessInfo.processInfo.environment["MINIOWL_TOKEN"],
            !envToken.isEmpty {
-            return CategorizationSettings(endpoint: apiURL, token: envToken)
+            return envToken
         }
         if let fileToken = TokenStore(dataDir: dataDir).readStripComments(),
            !fileToken.isEmpty {
-            return CategorizationSettings(endpoint: apiURL, token: fileToken)
+            return fileToken
         }
         return nil
+    }
+
+    /// Resolve the current user context from the context file. Called on
+    /// EVERY categorize request. Returns nil if file missing / empty /
+    /// placeholder-only — server falls back to defaults.
+    static func currentUserContext(dataDir: URL) -> String? {
+        return ContextStore(dataDir: dataDir).read()
     }
 }
 
 /// HTTPS POST to the categorization gateway. Stateless, request-scoped
 /// — one URLSession per call is fine for our request rate (~3/hour).
+/// Token + user context are resolved fresh from disk on every call.
 struct CategorizationClient {
-    let settings: CategorizationSettings
+    let dataDir: URL
 
     /// Default 30-second timeout matches the Go backend client and gives
     /// generous headroom for Claude Haiku at p99 (~3 s typical).
     var timeout: TimeInterval = 30
 
     func categorize(_ request: CategorizationRequest) async throws -> CategorizationResponse {
+        // Resolve fresh per-request. No cache. ~1-2ms file reads.
+        guard let token = CategorizationSettings.currentToken(dataDir: dataDir) else {
+            throw CategorizationError.notConfigured
+        }
+        let userContext = CategorizationSettings.currentUserContext(dataDir: dataDir)
+
+        // Rolling 7-day totals from on-disk .cats.jsonl files. ~7ms.
+        // Lets the LLM spot multi-day patterns (e.g. "5th Product-heavy day").
+        let weekBuckets = CategorizationLog(dataDir: dataDir).readLastNDays(7)
+        let weekTotals: [DayTotalPayload]? = weekBuckets.isEmpty
+            ? nil
+            : weekBuckets.map { DayTotalPayload(name: $0.name, ms: $0.ms, pct: $0.pct) }
+
+        // Inject week totals + user context into the request body.
+        let bodyWithContext = CategorizationRequest(
+            tz: request.tz,
+            window_start: request.window_start,
+            window_end: request.window_end,
+            events: request.events,
+            day_totals: request.day_totals,
+            day_active_ms: request.day_active_ms,
+            week_totals: weekTotals,
+            user_context: userContext
+        )
+
         var urlRequest = URLRequest(
-            url: settings.endpoint,
+            url: CategorizationSettings.apiURL,
             cachePolicy: .reloadIgnoringLocalCacheData,
             timeoutInterval: timeout
         )
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue(settings.token, forHTTPHeaderField: "X-Internal-Secret")
+        urlRequest.setValue(token, forHTTPHeaderField: "X-Internal-Secret")
         urlRequest.setValue("Miniowl/2.0", forHTTPHeaderField: "User-Agent")
 
         do {
-            urlRequest.httpBody = try JSONEncoder().encode(request)
+            urlRequest.httpBody = try JSONEncoder().encode(bodyWithContext)
         } catch {
             throw CategorizationError.decode(error)
         }

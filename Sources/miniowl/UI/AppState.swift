@@ -45,12 +45,13 @@ final class AppState: ObservableObject {
     private var categorizeTimer: DispatchSourceTimer?
     private var categorizeInflight = false
 
-    /// v2.0 — client config. Re-resolved on demand via `reloadToken()`
-    /// so edits to `token.txt` take effect without an app restart.
-    private var categorizationSettings: CategorizationSettings?
-
     /// Token file helper — used by the "Edit token" menu action.
+    /// Token itself is resolved per-request by the client, not cached here.
     let tokenStore: TokenStore
+
+    /// Context file helper — used by the "Edit context" menu action.
+    /// Context is resolved per-request by the client, not cached.
+    let contextStore: ContextStore
 
     /// Persistent categorization log — mirrors EventLog's JSONL-per-day
     /// pattern. Rehydrates `rollup` on startup so the menu isn't empty
@@ -98,11 +99,13 @@ final class AppState: ObservableObject {
         self.afkWatcher = AFKWatcher(coordinator: coordinator)
         self.systemWatcher = SystemWatcher(coordinator: coordinator)
 
-        // v2.0 — token file + compile-time URL. Ensure a placeholder
-        // token file exists so the user can find it via "Edit token".
+        // v2.0 — token + context files. Ensure placeholders exist so
+        // the user can find them via "Edit token…" / "Edit context…".
+        // Neither is cached — client reads fresh on every categorize call.
         self.tokenStore = TokenStore(dataDir: dataDir)
         tokenStore.initializeIfMissing()
-        self.categorizationSettings = CategorizationSettings.resolve(dataDir: dataDir)
+        self.contextStore = ContextStore(dataDir: dataDir)
+        contextStore.initializeIfMissing()
 
         // v2.0 — persistent categorization log. Prime `rollup` from the
         // last entry so the menu isn't empty after a restart. Silent
@@ -132,15 +135,11 @@ final class AppState: ObservableObject {
         startSummaryRefresh()
         refreshSummaryNow()
 
-        // v2.0 — start categorization timer if configured. First fire is
-        // delayed by 60s to let the user accumulate at least some data
-        // before the first call.
-        if categorizationSettings != nil {
-            startCategorizeTimer()
-            print("miniowl: categorization enabled (every \(Int(categorizeInterval))s)")
-        } else {
-            print("miniowl: categorization disabled (set MINIOWL_CATEGORIZE_URL + MINIOWL_TOKEN to enable)")
-        }
+        // v2.0 — always start the categorize timer. Token is resolved per-
+        // request by the client. If the user has no token configured, each
+        // call fails cleanly and the UI shows "set token" guidance.
+        startCategorizeTimer()
+        print("miniowl: categorization timer armed (every \(Int(categorizeInterval))s)")
 
         // SMAppService.register() is synchronous and very fast once the
         // binary is installed; slow only in the "never run before" case
@@ -191,9 +190,12 @@ final class AppState: ObservableObject {
 
     // ─── v2.0 token management ───────────────────────────────────────
 
-    /// True if a token is currently resolved (file or env var). UI uses
-    /// this to label the menu button and show status.
-    var hasToken: Bool { categorizationSettings != nil }
+    /// True if a token is currently resolvable. Reads the file fresh
+    /// each call so the menu label updates immediately after an edit.
+    /// ~1ms file read — cheap enough for a computed property.
+    var hasToken: Bool {
+        CategorizationSettings.currentToken(dataDir: dataDir) != nil
+    }
 
     /// Human-readable label of the environment this build targets
     /// ("dev (localhost)" or "production"). Shown in the menu for
@@ -206,25 +208,10 @@ final class AppState: ObservableObject {
         tokenStore.openInEditor()
     }
 
-    /// Re-read the token file after the user saves edits. Immediately
-    /// fires a categorization call so the user can verify the new token
-    /// works without waiting for the 20-minute timer.
-    func reloadToken() {
-        let resolved = CategorizationSettings.resolve(dataDir: dataDir)
-        let wasEnabled = categorizationSettings != nil
-        categorizationSettings = resolved
-
-        if resolved != nil {
-            rollupError = nil
-            // Start the timer if this is the first valid token we've seen.
-            if !wasEnabled && categorizeTimer == nil {
-                startCategorizeTimer()
-            }
-            Task { await runCategorizeOnce() }
-        } else {
-            rollup = nil
-            rollupError = "no token — set one via Edit token"
-        }
+    /// Open the context file in the user's default text editor. Changes
+    /// take effect on the next categorize call — no reload needed.
+    func editContext() {
+        contextStore.openInEditor()
     }
 
     // ─── Timers ──────────────────────────────────────────────────────
@@ -313,7 +300,6 @@ final class AppState: ObservableObject {
     /// paused, or another call is in-flight (single-flight semantics).
     /// Caller-safe to invoke from anywhere; runs on the global queue.
     func runCategorizeOnce() async {
-        guard let settings = categorizationSettings else { return }
         if paused { return }
 
         // Single-flight: bail if a call is already in progress.
@@ -331,11 +317,17 @@ final class AppState: ObservableObject {
         // empty (no activity), skip the call entirely.
         let today = DateUtils.localDateString(for: Date())
         let file = dataDir.appendingPathComponent("\(today).mow")
-        guard let req = CategoryRollup.buildRequest(file: file) else {
+        // Pass current day totals so the LLM can write a natural day summary.
+        let currentDayData = await MainActor.run { self.dayCategorization }
+        guard let req = CategoryRollup.buildRequest(
+            file: file,
+            dayCategorization: currentDayData
+        ) else {
             return
         }
 
-        let client = CategorizationClient(settings: settings)
+        // Client reads token + user context fresh from disk per request.
+        let client = CategorizationClient(dataDir: dataDir)
         do {
             let resp = try await client.categorize(req)
             let cached = CachedRollup(response: resp, computedAt: Date())
@@ -399,6 +391,14 @@ final class AppState: ObservableObject {
         let today = DateUtils.localDateString(for: Date())
         let url = dataDir.appendingPathComponent("\(today).mow")
         self.summary = LogReader.summarize(file: url)
+    }
+
+    /// Re-read today's .cats.jsonl and update the day view. Clears stale
+    /// yesterday data on day-change (file doesn't exist yet → nil).
+    /// Cost: ~1ms for a 35KB daily file. Called on popover onAppear so
+    /// the user never sees yesterday's bars on a new day.
+    func refreshDayCategorization() {
+        self.dayCategorization = categorizationLog.readToday()
     }
 
     // ─── Auto-launch ─────────────────────────────────────────────────
