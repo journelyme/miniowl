@@ -35,15 +35,18 @@ struct MenuContent: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(state.paused ? Color.red : Color.green)
-                .frame(width: 8, height: 8)
-            Text("Miniowl")
+            // Status = icon, not the word "Tracking" (which reads surveillance-y).
+            // Paused = "pause.circle.fill", active = "circle.fill" in green.
+            Image(systemName: state.paused ? "pause.circle.fill" : "circle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(state.paused ? Color.orange : Color.green)
+                .accessibilityLabel(state.paused ? "Paused" : "Active")
+
+            // Title doubles as a soft PR for the site. Every glance at the
+            // menu bar is a nudge toward miniowl.me.
+            Text("miniowl.me")
                 .fontWeight(.semibold)
-            Text("·")
-                .foregroundStyle(.tertiary)
-            Text(state.paused ? "Paused" : "Tracking")
-                .foregroundStyle(.secondary)
+
             Spacer()
             #if MINIOWL_DEV
             Text(state.environmentLabel)
@@ -115,7 +118,7 @@ struct MenuContent: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .padding(.top, 2)
-                } else if state.hasToken {
+                } else if state.hasDeviceToken {
                     Text("Waiting for first categorization (every 20 min)…")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -126,68 +129,130 @@ struct MenuContent: View {
     }
 
     private var actions: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(state.paused ? "Resume tracking" : "Pause tracking") {
-                state.togglePause()
-            }
+        VStack(alignment: .leading, spacing: 2) {
+            MenuRowButton(
+                systemImage: state.paused ? "play.circle" : "pause.circle",
+                title: state.paused ? "Resume tracking" : "Pause tracking",
+                action: { state.togglePause() }
+            )
             .keyboardShortcut("p")
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Open data folder") {
-                state.openDataFolder()
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            MenuRowButton(
+                systemImage: "folder",
+                title: "Open data folder",
+                action: { state.openDataFolder() }
+            )
 
-            // v2.0 — manual refresh of categories (skips the 20-min wait).
-            // Only meaningful if a token is configured.
-            if state.hasToken {
-                Button("Categorize now") {
-                    state.categorizeNow()
+            // (No manual "Categorize now" button — the product is "close
+            // the menu, do your work, we'll tell you at the end of the
+            // day". On-demand categorization invites attention drain and
+            // pointless server load.)
+
+            // Account connection via RFC 8628 device pairing flow.
+            if state.isPairing {
+                if let pairingState = state.pairingState {
+                    pairingView(pairingState: pairingState)
+                } else {
+                    Text("Starting pairing…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if state.hasDeviceToken {
+                MenuRowButton(
+                    systemImage: "rectangle.portrait.and.arrow.right",
+                    title: "\(state.connectionStatus) · Sign out",
+                    isLoading: state.isSigningOut,
+                    action: { state.signOut() }
+                )
+            } else {
+                MenuRowButton(
+                    systemImage: "link.badge.plus",
+                    title: state.isConnecting ? "Connecting…" : "Connect account…",
+                    isLoading: state.isConnecting,
+                    action: { state.connectAccount() }
+                )
             }
 
-            // v2.0 — token + context. Both files are read fresh from
-            // disk on every categorize call; no reload button needed.
-            Button(state.hasToken ? "Edit token…" : "Set token…") {
-                state.editToken()
+            // Pairing error banner (remains after the row returns to the
+            // "Connect account…" state so the user can see why it failed).
+            if let error = state.pairingError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 2)
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Edit context…") {
-                state.editContext()
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            MenuRowButton(
+                systemImage: "square.and.pencil",
+                title: "Edit context…",
+                action: { state.editContext() }
+            )
 
             if state.loginItemStatus != .enabled {
-                Button("Login items settings…") {
-                    state.openLoginItemSettings()
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                MenuRowButton(
+                    systemImage: "arrow.up.forward.app",
+                    title: "Login items settings…",
+                    action: { state.openLoginItemSettings() }
+                )
             }
 
             Divider()
-                .padding(.vertical, 2)
+                .padding(.vertical, 4)
 
-            Button("Quit Miniowl") {
-                NSApp.terminate(nil)
-            }
+            MenuRowButton(
+                systemImage: "power",
+                title: "Quit Miniowl",
+                action: { NSApp.terminate(nil) }
+            )
             .keyboardShortcut("q")
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    // MARK: - Pairing View
+
+    private func pairingView(pairingState: PairingState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Waiting to pair…")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Code: \(pairingState.displayUserCode)")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                if let url = URL(string: pairingState.verificationURL) {
+                    Link("Open \(url.host ?? "verification page")", destination: url)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.blue)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Button("Cancel") {
+                    state.cancelPairing()
+                }
+                .controlSize(.small)
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                if pairingState.isExpired {
+                    Button("Try again") {
+                        state.connectAccount()
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Text("Expires in \(Int(pairingState.expiresAt.timeIntervalSinceNow / 60))m")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

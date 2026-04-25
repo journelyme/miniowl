@@ -2,8 +2,8 @@ import Foundation
 
 /// File-backed store for the user's personalization context.
 ///
-/// Mirror of `TokenStore` but for free-form text: the user describes their
-/// work, projects, taxonomy preferences, and tone preferences. The server
+/// Free-form text store where the user describes their work, projects,
+/// taxonomy preferences, and tone preferences. The server
 /// appends this to the categorization prompt, so every user gets a
 /// customized experience without hardcoding Trung's specifics on the server.
 ///
@@ -115,9 +115,9 @@ struct ContextStore {
 
     // MARK: - Open in editor
 
-    /// Open the context file in the user's default text editor. Same
-    /// pattern as TokenStore.openInEditor() — uses `open -t` so the
-    /// file opens in whatever editor the user prefers for .md files.
+    /// Open the context file in the user's default text editor. Uses
+    /// `open -t` so the file opens in whatever editor the user prefers
+    /// for .md files.
     func openInEditor() {
         initializeIfMissing()
         let task = Process()

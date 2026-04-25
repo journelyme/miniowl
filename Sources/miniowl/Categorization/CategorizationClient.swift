@@ -11,7 +11,7 @@
 //      content. See `Categorization/Models.swift` for the exact wire shape.
 //    - URL is baked at BUILD time (dev vs prod via `#if MINIOWL_DEV`).
 //      No runtime env var, no way for a shipped binary to be redirected.
-//    - Token is read from `~/Library/Application Support/miniowl/token.txt`.
+//    - Device token is read from macOS Keychain (RFC 8628 pairing flow).
 //      Empty / missing → categorization silently disabled, v1 fallback.
 //    - If the client is misconfigured, the menu bar falls back to v1 view.
 // ─────────────────────────────────────────────────────────────────────
@@ -34,19 +34,34 @@ enum CategorizationError: Error, LocalizedError {
     }
 }
 
-/// Static settings: the API URL (compile-time) and environment label.
-/// Token and user context are resolved PER-REQUEST inside the client —
-/// not cached — so edits to `token.txt` / `context.md` take effect on
-/// the very next categorize call without any reload button.
+/// Static settings: the API URLs (compile-time) and environment label.
+/// Device token and user context are resolved PER-REQUEST inside the client —
+/// not cached — so edits to `context.md` take effect on the very next
+/// categorize call without any reload button.
 struct CategorizationSettings {
-    /// Compile-time API URL. Flipped by the `-DMINIOWL_DEV` flag in
+    /// Base API URL. Flipped by the `-DMINIOWL_DEV` flag in
     /// `scripts/build-app.sh --dev`. Default = production.
-    static var apiURL: URL {
+    static var baseURL: URL {
         #if MINIOWL_DEV
-        return URL(string: "http://localhost:8000/api/v1/miniowl/categorize")!
+        return URL(string: "http://localhost:8000/api/v1/miniowl")!
         #else
-        return URL(string: "https://api.contextly.me/api/v1/miniowl/categorize")!
+        return URL(string: "https://api.contextly.me/api/v1/miniowl")!
         #endif
+    }
+
+    /// Categorization endpoint URL
+    static var apiURL: URL {
+        baseURL.appendingPathComponent("categorize")
+    }
+
+    /// Pairing start endpoint URL
+    static var pairStartURL: URL {
+        baseURL.appendingPathComponent("pair/start")
+    }
+
+    /// Pairing poll endpoint URL
+    static var pairPollURL: URL {
+        baseURL.appendingPathComponent("pair/poll")
     }
 
     /// Human-readable environment label for diagnostics / menu display.
@@ -58,20 +73,14 @@ struct CategorizationSettings {
         #endif
     }
 
-    /// Resolve the current token from env var OR the token file. Called
-    /// on EVERY categorize request — ~1ms file read, negligible at 20m
-    /// cadence. Returns nil if no token is set (caller treats as
-    /// "categorization disabled, fall back to v1 view").
-    static func currentToken(dataDir: URL) -> String? {
-        if let envToken = ProcessInfo.processInfo.environment["MINIOWL_TOKEN"],
-           !envToken.isEmpty {
-            return envToken
-        }
-        if let fileToken = TokenStore(dataDir: dataDir).readStripComments(),
-           !fileToken.isEmpty {
-            return fileToken
-        }
-        return nil
+    /// Resolve the current device token from macOS Keychain. Called on
+    /// EVERY categorize request. Returns nil if the user hasn't paired yet
+    /// — the caller treats that as "categorization disabled, fall back to
+    /// v1 view" and the menu shows "Connect account…".
+    static func currentToken() -> String? {
+        let store = DeviceTokenStore()
+        guard let token = store.read(), !token.isEmpty else { return nil }
+        return token
     }
 
     /// Resolve the current user context from the context file. Called on
@@ -93,8 +102,8 @@ struct CategorizationClient {
     var timeout: TimeInterval = 30
 
     func categorize(_ request: CategorizationRequest) async throws -> CategorizationResponse {
-        // Resolve fresh per-request. No cache. ~1-2ms file reads.
-        guard let token = CategorizationSettings.currentToken(dataDir: dataDir) else {
+        // Resolve fresh per-request. No cache. ~1ms Keychain read.
+        guard let token = CategorizationSettings.currentToken() else {
             throw CategorizationError.notConfigured
         }
         let userContext = CategorizationSettings.currentUserContext(dataDir: dataDir)
@@ -125,7 +134,7 @@ struct CategorizationClient {
         )
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue(token, forHTTPHeaderField: "X-Internal-Secret")
+        urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("Miniowl/2.0", forHTTPHeaderField: "User-Agent")
 
         do {
@@ -154,6 +163,92 @@ struct CategorizationClient {
 
         do {
             return try CategorizationResponse.decode(data)
+        } catch {
+            throw CategorizationError.decode(error)
+        }
+    }
+
+    // MARK: - Pairing Endpoints
+
+    /// Start the device pairing flow (POST /api/v1/miniowl/pair/start)
+    static func pairStart(_ request: PairStartRequest) async throws -> PairStartResponse {
+        var urlRequest = URLRequest(
+            url: CategorizationSettings.pairStartURL,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 30
+        )
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Miniowl/2.0", forHTTPHeaderField: "User-Agent")
+
+        do {
+            urlRequest.httpBody = try JSONEncoder().encode(request)
+        } catch {
+            throw CategorizationError.decode(error)
+        }
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: urlRequest)
+        } catch {
+            throw CategorizationError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw CategorizationError.httpError(status: -1)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw CategorizationError.httpError(status: http.statusCode)
+        }
+
+        do {
+            return try PairStartResponse.decode(data)
+        } catch {
+            throw CategorizationError.decode(error)
+        }
+    }
+
+    /// Poll for pairing approval (GET /api/v1/miniowl/pair/poll)
+    static func pairPoll(deviceCode: String) async throws -> PairPollResponse {
+        var components = URLComponents(url: CategorizationSettings.pairPollURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "device_code", value: deviceCode)]
+
+        guard let url = components.url else {
+            throw CategorizationError.transport(NSError(domain: "URLError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"]))
+        }
+
+        var urlRequest = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 30
+        )
+        urlRequest.httpMethod = "GET"
+        urlRequest.setValue("Miniowl/2.0", forHTTPHeaderField: "User-Agent")
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: urlRequest)
+        } catch {
+            throw CategorizationError.transport(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw CategorizationError.httpError(status: -1)
+        }
+
+        // Handle specific HTTP status codes for pairing
+        if http.statusCode == 410 {
+            return PairPollResponse(status: "expired", device_token: nil)
+        } else if http.statusCode == 403 {
+            return PairPollResponse(status: "denied", device_token: nil)
+        } else if http.statusCode == 404 {
+            return PairPollResponse(status: "expired", device_token: nil)
+        } else if !(200..<300).contains(http.statusCode) {
+            throw CategorizationError.httpError(status: http.statusCode)
+        }
+
+        do {
+            return try PairPollResponse.decode(data)
         } catch {
             throw CategorizationError.decode(error)
         }

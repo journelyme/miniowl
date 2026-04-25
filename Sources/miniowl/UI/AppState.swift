@@ -30,6 +30,19 @@ final class AppState: ObservableObject {
     @Published var rollupError: String?
     @Published var showRawApps = false
 
+    // v2.0 — Pairing flow state.
+    @Published var isPairing = false
+    @Published var pairingState: PairingState?
+    @Published var pairingError: String?
+    /// True from the moment the user clicks "Connect account…" until the
+    /// /pair/start response comes back (or errors). Lets the menu button
+    /// show a spinner + disable itself so rapid clicks can't fire multiple
+    /// pair/start calls.
+    @Published var isConnecting = false
+    /// Brief (~250 ms) disabled window after clicking Sign out so the row
+    /// can't be re-clicked while Keychain delete is in flight.
+    @Published var isSigningOut = false
+
     // ─── Backing ─────────────────────────────────────────────────────
     let dataDir: URL
     let coordinator: EventCoordinator
@@ -45,13 +58,15 @@ final class AppState: ObservableObject {
     private var categorizeTimer: DispatchSourceTimer?
     private var categorizeInflight = false
 
-    /// Token file helper — used by the "Edit token" menu action.
-    /// Token itself is resolved per-request by the client, not cached here.
-    let tokenStore: TokenStore
-
     /// Context file helper — used by the "Edit context" menu action.
     /// Context is resolved per-request by the client, not cached.
     let contextStore: ContextStore
+
+    /// Device token store for Keychain-backed token (RFC 8628 pairing flow).
+    let deviceTokenStore = DeviceTokenStore()
+
+    /// Device authorization flow coordinator.
+    let pairingFlow = PairingFlow()
 
     /// Persistent categorization log — mirrors EventLog's JSONL-per-day
     /// pattern. Rehydrates `rollup` on startup so the menu isn't empty
@@ -99,11 +114,9 @@ final class AppState: ObservableObject {
         self.afkWatcher = AFKWatcher(coordinator: coordinator)
         self.systemWatcher = SystemWatcher(coordinator: coordinator)
 
-        // v2.0 — token + context files. Ensure placeholders exist so
-        // the user can find them via "Edit token…" / "Edit context…".
-        // Neither is cached — client reads fresh on every categorize call.
-        self.tokenStore = TokenStore(dataDir: dataDir)
-        tokenStore.initializeIfMissing()
+        // Context file — ensure placeholder exists so the user can find
+        // it via "Edit context…". Not cached — client reads fresh on
+        // every categorize call.
         self.contextStore = ContextStore(dataDir: dataDir)
         contextStore.initializeIfMissing()
 
@@ -188,30 +201,101 @@ final class AppState: ObservableObject {
         SMAppService.openSystemSettingsLoginItems()
     }
 
-    // ─── v2.0 token management ───────────────────────────────────────
-
-    /// True if a token is currently resolvable. Reads the file fresh
-    /// each call so the menu label updates immediately after an edit.
-    /// ~1ms file read — cheap enough for a computed property.
-    var hasToken: Bool {
-        CategorizationSettings.currentToken(dataDir: dataDir) != nil
-    }
-
     /// Human-readable label of the environment this build targets
     /// ("dev (localhost)" or "production"). Shown in the menu for
     /// transparency — the user should never be surprised about which
     /// backend their data goes to.
     var environmentLabel: String { CategorizationSettings.environmentLabel }
 
-    /// Open the token file in the user's default text editor.
-    func editToken() {
-        tokenStore.openInEditor()
-    }
-
     /// Open the context file in the user's default text editor. Changes
     /// take effect on the next categorize call — no reload needed.
     func editContext() {
         contextStore.openInEditor()
+    }
+
+    // ─── Pairing flow management ─────────────────────────────────────
+
+    /// True if the Mac is paired (device token present in Keychain).
+    /// Reads fresh each call — cheap Keychain lookup, ~1ms.
+    var hasDeviceToken: Bool {
+        deviceTokenStore.read() != nil
+    }
+
+    /// Human-readable connection status for the menu
+    var connectionStatus: String {
+        hasDeviceToken ? "Signed in" : "Not connected"
+    }
+
+    /// Start the device pairing flow. The PairingFlow polls in the
+    /// background and calls `onCompletion` exactly once when it terminates
+    /// (success OR failure), so we always unstick the "Waiting to pair…" UI.
+    ///
+    /// `isConnecting` is flipped true immediately and cleared only after
+    /// the /pair/start response (success or error) lands. The menu button
+    /// disables itself during that window so rapid clicks can't fire
+    /// duplicate pair_code rows at the server.
+    func connectAccount() {
+        guard !isConnecting && !isPairing else { return }
+        isConnecting = true
+        pairingError = nil
+
+        Task {
+            do {
+                let state = try await pairingFlow.startPairing { @MainActor failureMessage in
+                    self.isPairing = false
+                    self.pairingState = nil
+                    // nil = success → no banner. Non-nil = surface to user.
+                    self.pairingError = failureMessage
+                }
+
+                await MainActor.run {
+                    self.isConnecting = false
+                    self.isPairing = true
+                    self.pairingState = state
+                }
+            } catch {
+                await MainActor.run {
+                    self.isConnecting = false
+                    self.pairingError = error.localizedDescription
+                    self.isPairing = false
+                    self.pairingState = nil
+                }
+                print("miniowl: pairing failed: \(error)")
+            }
+        }
+    }
+
+    /// Cancel the current pairing flow
+    func cancelPairing() {
+        Task {
+            await pairingFlow.cancelPairing()
+            await MainActor.run {
+                self.isPairing = false
+                self.pairingState = nil
+                self.pairingError = nil
+            }
+        }
+    }
+
+    /// Sign out - remove device token from Keychain.
+    /// Brief disabled window so rapid re-click can't race.
+    func signOut() {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        Task {
+            do {
+                try deviceTokenStore.delete()
+                print("miniowl: signed out successfully")
+            } catch {
+                print("miniowl: sign out failed: \(error)")
+            }
+            // Small UX beat — user sees "yes, you did that" instead of a
+            // jarringly-instant state flip.
+            try? await Task.sleep(for: .milliseconds(250))
+            await MainActor.run {
+                self.isSigningOut = false
+            }
+        }
     }
 
     // ─── Timers ──────────────────────────────────────────────────────
@@ -358,12 +442,6 @@ final class AppState: ObservableObject {
             }
             fputs("miniowl: categorize failed: \(error)\n", stderr)
         }
-    }
-
-    /// Called by the menu so the user can force a refresh without waiting
-    /// for the next 20-minute tick.
-    func categorizeNow() {
-        Task { await runCategorizeOnce() }
     }
 
     /// Quit and immediately relaunch /Applications/miniowl.app. The
