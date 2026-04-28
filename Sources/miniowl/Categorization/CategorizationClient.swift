@@ -64,6 +64,22 @@ struct CategorizationSettings {
         baseURL.appendingPathComponent("pair/poll")
     }
 
+    /// Web app base URL — separate from the API. Used by menu items that
+    /// open browser pages (Dashboard, Privacy settings).
+    /// dev → http://localhost:3003 ; prod → https://miniowl.me
+    static var webURL: URL {
+        #if MINIOWL_DEV
+        return URL(string: "http://localhost:3003")!
+        #else
+        return URL(string: "https://miniowl.me")!
+        #endif
+    }
+
+    /// Dashboard page URL (the user's daily activity view + privacy toggle).
+    static var dashboardURL: URL {
+        webURL.appendingPathComponent("dashboard")
+    }
+
     /// Human-readable environment label for diagnostics / menu display.
     static var environmentLabel: String {
         #if MINIOWL_DEV

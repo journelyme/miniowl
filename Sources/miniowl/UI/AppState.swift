@@ -205,6 +205,13 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.open(dataDir)
     }
 
+    /// Open the web dashboard in the user's default browser. URL is
+    /// compile-time (dev → localhost:3003, prod → miniowl.me) so a shipped
+    /// build can never be redirected to a different origin.
+    func openDashboard() {
+        NSWorkspace.shared.open(CategorizationSettings.dashboardURL)
+    }
+
     func openAccessibilitySettings() {
         AccessibilityPermission.openSystemSettings()
     }

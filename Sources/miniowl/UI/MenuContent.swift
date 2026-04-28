@@ -143,6 +143,14 @@ struct MenuContent: View {
                 action: { state.openDataFolder() }
             )
 
+            // Dashboard link — opens the web app where the user manages
+            // privacy (cloud-sync toggle) and views their day rollups.
+            MenuRowButton(
+                systemImage: "chart.bar.doc.horizontal",
+                title: "Open dashboard…",
+                action: { state.openDashboard() }
+            )
+
             // (No manual "Categorize now" button — the product is "close
             // the menu, do your work, we'll tell you at the end of the
             // day". On-demand categorization invites attention drain and
