@@ -143,20 +143,14 @@ struct MenuContent: View {
                 action: { state.openDataFolder() }
             )
 
-            // Dashboard link — opens the web app where the user manages
-            // privacy (cloud-sync toggle) and views their day rollups.
-            MenuRowButton(
-                systemImage: "chart.bar.doc.horizontal",
-                title: "Open dashboard…",
-                action: { state.openDashboard() }
-            )
-
             // (No manual "Categorize now" button — the product is "close
             // the menu, do your work, we'll tell you at the end of the
             // day". On-demand categorization invites attention drain and
             // pointless server load.)
 
             // Account connection via RFC 8628 device pairing flow.
+            // Comes BEFORE "Open dashboard" because the dashboard requires
+            // a paired account — natural left-to-right flow for new users.
             if state.isPairing {
                 if let pairingState = state.pairingState {
                     pairingView(pairingState: pairingState)
@@ -181,6 +175,17 @@ struct MenuContent: View {
                     action: { state.connectAccount() }
                 )
             }
+
+            // Dashboard link — opens the web app where the user manages
+            // the cloud-sync toggle and views their day rollups. Always
+            // visible (even pre-pair) so users discover the upgrade path;
+            // pre-pair clicks land on /dashboard which redirects to login.
+            // No trailing ellipsis: this opens a browser, not a sub-flow.
+            MenuRowButton(
+                systemImage: "safari",
+                title: "Open dashboard",
+                action: { state.openDashboard() }
+            )
 
             // Pairing error banner (remains after the row returns to the
             // "Connect account…" state so the user can see why it failed).
