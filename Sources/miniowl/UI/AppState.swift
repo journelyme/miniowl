@@ -68,6 +68,12 @@ final class AppState: ObservableObject {
     /// Device authorization flow coordinator.
     let pairingFlow = PairingFlow()
 
+    /// Outbox for /categorize calls. Every 20-min tick enqueues a window
+    /// here; SyncCoordinator drains it (oldest first, ≤5 per tick) and
+    /// re-tries on the next tick if the server is unreachable. Server-
+    /// side idempotency (migration 035) makes retries safe.
+    let syncCoordinator: SyncCoordinator
+
     /// Persistent categorization log — mirrors EventLog's JSONL-per-day
     /// pattern. Rehydrates `rollup` on startup so the menu isn't empty
     /// after a relaunch.
@@ -104,6 +110,12 @@ final class AppState: ObservableObject {
         }
         let stateFile = StateFile(directory: dataDir)
         self.coordinator = EventCoordinator(log: log, stateFile: stateFile)
+
+        // Outbox for /categorize calls. Reads any persisted pending
+        // entries from sync_state.json on init so windows enqueued in
+        // a previous session resume on next tick.
+        let syncState = SyncState(directory: dataDir)
+        self.syncCoordinator = SyncCoordinator(syncState: syncState, dataDir: dataDir)
 
         // Watchers.
         self.browserWatcher = BrowserWatcher()
@@ -380,13 +392,22 @@ final class AppState: ObservableObject {
         self.categorizeTimer = t
     }
 
-    /// One round-trip to the categorization API. No-op if v2 is disabled,
-    /// paused, or another call is in-flight (single-flight semantics).
-    /// Caller-safe to invoke from anywhere; runs on the global queue.
+    /// One categorize "tick". Enqueues the current 20-min window into
+    /// the outbox and drains up to 5 oldest pending windows.
+    ///
+    /// No-op if paused or another tick is already running (single-flight
+    /// at the AppState level — SyncCoordinator's actor isolation also
+    /// serializes the inner work). Network failures don't lose data:
+    /// pending entries stay in sync_state.json and retry next tick.
+    /// Server-side idempotency (migration 035) means a re-sent window
+    /// is a no-op on the server, never double-counts.
     func runCategorizeOnce() async {
         if paused { return }
 
-        // Single-flight: bail if a call is already in progress.
+        // Single-flight at the AppState level. We still go through the
+        // SyncCoordinator actor for actual queue mutations, but this
+        // bail-out keeps two overlapping tick fires from doing redundant
+        // work (e.g. timer firing while a manual trigger is mid-drain).
         let alreadyRunning = await MainActor.run { () -> Bool in
             if categorizeInflight { return true }
             categorizeInflight = true
@@ -397,50 +418,68 @@ final class AppState: ObservableObject {
             Task { @MainActor in self.categorizeInflight = false }
         }
 
-        // Build the request from today's on-disk events. If the file is
-        // empty (no activity), skip the call entirely.
-        let today = DateUtils.localDateString(for: Date())
+        // Snapshot current day totals (so the LLM can write a natural
+        // day_summary referencing them) and the live window timing.
+        let now = Date()
+        let today = DateUtils.localDateString(for: now)
         let file = dataDir.appendingPathComponent("\(today).mow")
-        // Pass current day totals so the LLM can write a natural day summary.
         let currentDayData = await MainActor.run { self.dayCategorization }
-        guard let req = CategoryRollup.buildRequest(
+
+        // Compute the current window's [start, end] in Unix-ms. We use
+        // CategoryRollup.defaultWindow so the outbox entry matches what
+        // the client would have built today. Empty windows are skipped
+        // — no point enqueueing a payload with zero events.
+        let windowSeconds = CategoryRollup.defaultWindow
+        let endMs = Int64(now.timeIntervalSince1970 * 1000)
+        let startMs = Int64((now.timeIntervalSince1970 - windowSeconds) * 1000)
+
+        // Skip enqueue if the file has no events covering this window —
+        // saves us a wasted server round-trip and a no-op pending entry.
+        let hasActivity = CategoryRollup.buildRequest(
             file: file,
+            window: windowSeconds,
+            now: now,
+            timezone: .current,
             dayCategorization: currentDayData
-        ) else {
-            return
+        ) != nil
+        if hasActivity {
+            await syncCoordinator.enqueue(
+                startMs: startMs,
+                endMs: endMs,
+                tz: TimeZone.current.identifier
+            )
         }
 
-        // Client reads token + user context fresh from disk per request.
+        // Always drain — even if the live window had nothing, prior
+        // pending entries from a network outage might be ready to ship.
         let client = CategorizationClient(dataDir: dataDir)
-        do {
-            let resp = try await client.categorize(req)
-            let cached = CachedRollup(response: resp, computedAt: Date())
+        let outcome = await syncCoordinator.drain(
+            client: client,
+            log: categorizationLog,
+            currentDayData: currentDayData
+        )
 
-            // Persist BEFORE publishing to @Published so a crash between
-            // the two doesn't lose the row. File I/O runs on the current
-            // utility queue (outside the main actor).
-            do {
-                try categorizationLog.append(cached, request: req)
-            } catch {
-                fputs("miniowl: categorization log append failed: \(error)\n", stderr)
-            }
+        // Recompute cumulative day totals from ALL today's entries (this
+        // includes the freshly-synced windows from the drain, if any).
+        let dayData = categorizationLog.readToday()
 
-            // Recompute cumulative day totals from ALL today's entries.
-            let dayData = categorizationLog.readToday()
-
-            await MainActor.run {
+        await MainActor.run {
+            if let cached = outcome.latestSynced {
                 self.rollup = cached
-                self.dayCategorization = dayData
+            }
+            self.dayCategorization = dayData
+            // Surface error only if NOTHING drained successfully this
+            // tick. Partial drains (some succeeded, then later failed)
+            // shouldn't show an error — the user is making progress.
+            if outcome.latestSynced != nil {
                 self.rollupError = nil
+            } else if let err = outcome.lastError {
+                self.rollupError = err.errorDescription ?? "\(err)"
             }
-        } catch {
-            // Fail-soft: keep showing the last good rollup if any, surface
-            // a one-line error in the UI for transparency.
-            await MainActor.run {
-                self.rollupError = (error as? CategorizationError)?.errorDescription
-                    ?? "\(error)"
-            }
-            fputs("miniowl: categorize failed: \(error)\n", stderr)
+        }
+
+        if let err = outcome.lastError {
+            fputs("miniowl: categorize drain stopped (pending=\(outcome.pendingCount)): \(err)\n", stderr)
         }
     }
 
