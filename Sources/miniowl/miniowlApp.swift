@@ -21,19 +21,34 @@ struct MiniowlApp: App {
             MenuContent()
                 .environmentObject(appDelegate.state)
         } label: {
-            // Custom owl icon rendered as template so macOS adapts the
-            // color to the menu bar appearance (dark bar → white icon,
-            // light bar → dark icon) automatically.
-            let iconName = appDelegate.state.paused ? "MenuBarIcon-paused" : "MenuBarIcon"
-            if let img = loadMenuBarIcon(named: iconName) {
-                Image(nsImage: img)
-            } else {
-                // Fallback to SF Symbol if bundled icon is missing
-                // (e.g. during `swift run` without a full .app bundle).
-                Image(systemName: appDelegate.state.paused ? "eye.slash" : "eye")
-            }
+            // The label closure runs once when the Scene is built and
+            // doesn't re-evaluate on its own. To make the menu-bar icon
+            // swap when `paused` flips, the label has to be a real View
+            // that observes AppState — that's what MenuBarLabel does.
+            MenuBarLabel(state: appDelegate.state)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Menu-bar icon view. ObservedObject on AppState makes SwiftUI re-render
+/// this every time `state.paused` (or any other published property we
+/// touch here) changes, swapping the icon between active and paused.
+struct MenuBarLabel: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        // Custom owl icon rendered as template so macOS adapts color to
+        // the menu bar appearance (dark bar → white icon, light bar →
+        // dark icon) automatically.
+        let iconName = state.paused ? "MenuBarIcon-paused" : "MenuBarIcon"
+        if let img = loadMenuBarIcon(named: iconName) {
+            Image(nsImage: img)
+        } else {
+            // Fallback to SF Symbol if the bundled PNG is missing
+            // (e.g. during `swift run` without a full .app bundle).
+            Image(systemName: state.paused ? "eye.slash" : "eye")
+        }
     }
 }
 

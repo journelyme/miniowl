@@ -34,9 +34,10 @@ struct CategorizationLog {
         let window_start: Int64
         let window_end: Int64
         let tz: String
-        /// Server-returned categories + summary.
+        /// Server-returned categories + summaries.
         let categories: [CategoryBucket]
         let summary: String
+        let day_summary: String?
 
         init(cached: CachedRollup, request: CategorizationRequest) {
             self.t = "c"
@@ -46,6 +47,7 @@ struct CategorizationLog {
             self.tz = request.tz
             self.categories = cached.response.categories
             self.summary = cached.response.summary
+            self.day_summary = cached.response.day_summary
         }
     }
 
@@ -139,6 +141,7 @@ struct CategorizationLog {
 
         var totals: [String: Int64] = [:]
         var lastSummary = ""
+        var lastDaySummary: String? = nil
         var lastAt: Int64 = 0
         var count = 0
 
@@ -150,6 +153,9 @@ struct CategorizationLog {
                 totals[cat.name, default: 0] += Int64(cat.ms)
             }
             lastSummary = entry.summary
+            if let ds = entry.day_summary, !ds.isEmpty {
+                lastDaySummary = ds
+            }
             if entry.at > lastAt { lastAt = entry.at }
             count += 1
         }
@@ -170,8 +176,57 @@ struct CategorizationLog {
             totalActiveMs: totalMs,
             windowCount: count,
             lastWindowSummary: lastSummary,
+            daySummary: lastDaySummary,
             lastCategorizedAt: Date(timeIntervalSince1970: Double(lastAt) / 1000)
         )
+    }
+
+    // MARK: - Multi-day aggregation
+
+    /// Aggregate category totals across the last `days` days (rolling window,
+    /// INCLUDING today in progress). Used to send "last 7 days" context to
+    /// the LLM so it can spot multi-day patterns (e.g. "5th consecutive
+    /// Product-heavy day").
+    ///
+    /// Rolling window, NOT calendar week — so on Monday morning we still
+    /// have 7 full days of signal instead of near-empty "this week".
+    ///
+    /// Cost: ~7 files × ~1ms each = ~7ms. Called once per 20-min tick.
+    func readLastNDays(_ days: Int = 7) -> [CategoryBucket] {
+        guard days > 0 else { return [] }
+
+        var totals: [String: Int64] = [:]
+        let cal = Calendar.current
+        let now = Date()
+
+        for offset in 0..<days {
+            guard let d = cal.date(byAdding: .day, value: -offset, to: now) else {
+                continue
+            }
+            let url = fileURL(for: d)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let lines = data.split(separator: 0x0A, omittingEmptySubsequences: true)
+            for line in lines {
+                guard let entry = try? JSONDecoder().decode(Entry.self, from: Data(line)) else {
+                    continue
+                }
+                for cat in entry.categories {
+                    totals[cat.name, default: 0] += Int64(cat.ms)
+                }
+            }
+        }
+
+        if totals.isEmpty { return [] }
+
+        let totalMs = totals.values.reduce(0 as Int64, +)
+        let sorted = totals.map { name, ms in
+            CategoryBucket(
+                name: name,
+                ms: ms,
+                pct: totalMs > 0 ? Int(Double(ms) / Double(totalMs) * 100) : 0
+            )
+        }.sorted { $0.ms > $1.ms }
+        return sorted
     }
 
     // MARK: - Helpers
@@ -193,7 +248,8 @@ struct CategorizationLog {
     private func toCachedRollup(_ entry: Entry) -> CachedRollup {
         let response = CategorizationResponse(
             categories: entry.categories,
-            summary: entry.summary
+            summary: entry.summary,
+            day_summary: entry.day_summary
         )
         let date = Date(timeIntervalSince1970: Double(entry.at) / 1000.0)
         return CachedRollup(response: response, computedAt: date)

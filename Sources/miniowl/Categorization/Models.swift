@@ -27,11 +27,26 @@ struct CategorizationEvent: Codable, Equatable {
     let ms: Int64              // duration ms
 }
 
+struct DayTotalPayload: Codable {
+    let name: String
+    let ms: Int64
+    let pct: Int
+}
+
 struct CategorizationRequest: Codable {
     let tz: String
     let window_start: Int64    // Unix ms UTC
     let window_end: Int64      // Unix ms UTC
     let events: [CategorizationEvent]
+    let day_totals: [DayTotalPayload]?
+    let day_active_ms: Int64?
+    /// Rolling 7-day aggregate (today + 6 prior days). Used by LLM to
+    /// spot multi-day patterns — e.g. "5th consecutive Product-heavy day".
+    let week_totals: [DayTotalPayload]?
+    /// Free-form user context from ~/Library/Application Support/miniowl/context.md.
+    /// Optional. Server appends to system prompt as additional user guidance.
+    /// Capped at 8 KB client-side.
+    let user_context: String?
 }
 
 // MARK: - Response
@@ -50,6 +65,7 @@ struct CategoryBucket: Codable, Equatable, Identifiable {
 struct CategorizationResponse: Codable, Equatable {
     let categories: [CategoryBucket]
     let summary: String
+    let day_summary: String?
 
     /// Decode tolerantly: try the wrapped Go envelope first, then the raw
     /// Python shape, then surface a useful error.

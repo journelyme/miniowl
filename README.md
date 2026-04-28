@@ -1,8 +1,8 @@
 <div align="center">
   <img src="assets/icon-256.png" width="140" alt="Miniowl app icon" />
   <h1>Miniowl</h1>
-  <p><strong>A tiny, privacy-first macOS activity tracker that lives in your menu bar.</strong></p>
-  <p>~1,500 lines of Swift · zero dependencies · plain JSONL files · no network</p>
+  <p><strong>A menu-bar honesty meter for solo founders. Are you shipping, or just coding?</strong></p>
+  <p>~4,000 lines of Swift · zero dependencies · plain JSONL files · private by default, optional cloud sync</p>
   <br/>
   <img src="assets/screenshot-popover.png" width="320" alt="miniowl menu bar popover" />
   <p>
@@ -19,18 +19,20 @@
 
 ## What it is
 
-miniowl is a small macOS app that quietly records which application has focus, what its window title is, when you're at the keyboard versus away, and (for whitelisted browsers) the URL of your current tab. It writes everything to a plain JSON-Lines file under `~/Library/Application Support/miniowl/`. Nothing leaves your Mac. The whole source tree is around 1,500 lines of Swift you can read in one sitting.
+miniowl is a small macOS app that quietly records which application has focus, what its window title is, when you're at the keyboard versus away, and (for whitelisted browsers) the URL of your current tab. It writes everything to a plain JSON-Lines file under `~/Library/Application Support/miniowl/`. By default, **nothing leaves your Mac**.
 
-It exists because **the only honest way to know where your time goes is to measure it**. Self-reports are flattering and inaccurate. Calendars are aspirational. Miniowl just records what actually happened.
+v2 adds an **opt-in** cloud-sync mode. When you turn it on, miniowl sends a compact summary of each 20-minute window to a categorization service that returns strategic buckets — *Product, GTM, Strategy, Learning, Admin, Operations, Personal* — and persists one daily-rollup row per user so you can review your week from a web dashboard. Cloud sync is **off until you flip it on**, and toggling it off purges every saved row from the server in the same call. See [Privacy contract → v2 cloud sync](#v2-cloud-sync-opt-in) for the exact wire shape.
+
+It exists because **the only honest way to know where your time goes is to measure it**. Self-reports are flattering and inaccurate. Calendars are aspirational. Miniowl just records what actually happened — and v2 helps you see it as the categories that decide whether you ship or stall.
 
 ## Why you might want it
 
 - You want to answer "where did the week go?" with data instead of memory.
-- You're trying to escape a productivity trap (e.g. shipping code when you should be talking to users) and need to see your time honestly.
-- You don't want a SaaS time tracker reading your screen, syncing to a server, or showing you a dashboard designed to keep you engaged.
-- You want a small, single-binary tool you can audit, fork, and modify in an afternoon.
+- You're a solo founder trying to escape the **Joy+Skill trap** (coding when you should be talking to users) and need to see your time honestly grouped by strategic category.
+- You don't want a SaaS time tracker reading your screen, screenshotting your work, or showing you a dashboard designed to keep you engaged.
+- You want a small, source-visible tool you can audit and trust on a privacy-sensitive product.
 
-If those don't resonate, you probably want something else — RescueTime, Toggl, Timing, or ActivityWatch are all good. Miniowl is deliberately the opposite of "fully featured."
+If those don't resonate, you probably want something else — RescueTime, Toggl, Timing, or ActivityWatch are all good. Miniowl is deliberately narrow: built for one persona, on one platform, with one opinion about what time data is for.
 
 ## Privacy contract
 
@@ -46,11 +48,17 @@ These are **code-enforced** invariants. The build fails if any banned API appear
 
 The audit surface is small enough that a skeptic can read every line of Swift in under an hour and verify these claims.
 
-### v2.0 (opt-in) — categorization
+### v2 cloud sync (opt-in)
 
-v2.0 adds an **opt-in** network call: every 20 minutes, miniowl POSTs a compact summary of the window to a categorization API which returns strategic-bucket totals (Product / GTM / Strategy / Learning / Admin / Operations / Personal). Disabled by default; enabled when both `MINIOWL_CATEGORIZE_URL` and `MINIOWL_TOKEN` env vars are set.
+v2 adds **two** opt-in network paths, both off by default and both gated by an explicit user action.
 
-**What v2.0 sends** (per call, ~once every 20 minutes, batched):
+**1. Pairing (one-time, RFC 8628 device-code flow).** Click *Connect account…* in the menu bar. miniowl asks the server for a short-lived `device_code` and `user_code`, opens your default browser to the dashboard, and you log in with your Supabase account and confirm. The server issues a long-lived **device token** (`miniowl_sk_…`) which is stored in the **macOS Keychain** — never on disk in plaintext, never in source. You can revoke any device from the dashboard at any time.
+
+**2. Categorization (every 20 minutes, only when cloud sync is on).** Once paired AND the per-user `cloud_sync_enabled` flag is `true` (the dashboard toggle), miniowl POSTs a compact summary of the last window to the categorization API. The response is a list of strategic buckets — *Product, GTM, Strategy, Learning, Admin, Operations, Personal* — plus one short founder-honest summary line. The server stores **one row per user per day** in a `day_rollups` table; raw window/event data never leaves your Mac.
+
+**Cloud sync OFF (default):** the categorize call still works locally so the menu bar can show category bars in real time, but the server **does not persist anything**. Your `day_rollups` row is never created. Toggling OFF after it was on triggers a **hard-delete** of every saved row for your user, in the same call. The dashboard goes empty.
+
+**What miniowl sends** (per call, batched, only when cloud sync is on):
 
 ```jsonc
 {
@@ -70,11 +78,13 @@ v2.0 adds an **opt-in** network call: every 20 minutes, miniowl POSTs a compact 
 }
 ```
 
-**What v2.0 does NOT send:** keystrokes, clipboard, screen pixels, page content/HTML/text, form data, full URLs (only host + first path segment), file contents, network packets from other apps, anything from outside the existing v1 watchers.
+**What miniowl does NOT send, ever:** keystrokes, clipboard, screen pixels, page content / HTML / text, form data, full URLs (only host + first path segment), file contents, audio, network packets from other apps, anything from outside the existing v1 watchers.
 
-**Allowlisted file:** `URLSession` is allowed in **exactly one file** (`Sources/miniowl/Categorization/CategorizationClient.swift`). The privacy-check script enforces this — any other file that imports `URLSession` fails the build. This keeps the network surface auditable in <50 lines.
+**Auth seam:** the device token rides in `Authorization: Bearer miniowl_sk_<…>` over HTTPS. The server validates it against a hashed copy in `miniowl.devices.token_hash` (we never store the plaintext) and binds the call to your `user_id` before any business logic runs. The token is the only credential miniowl carries — there is no shared client secret in the source tree.
 
-**Free vs paid:** v1 (raw local tracking) is **free forever** — never makes a network call. v2 categorization activates only when the user supplies a token. Phase 2a token entry is via env var (`MINIOWL_TOKEN`); Phase 2b will move this to a Settings panel that persists to the macOS Keychain. If no token is set, miniowl shows the v1 raw-app view exactly as before.
+**Allowlisted file:** `URLSession` is allowed in **exactly one file** (`Sources/miniowl/Categorization/CategorizationClient.swift`). The privacy-check script enforces this — any other file that imports `URLSession` fails the build. The whole network surface is auditable in <100 lines.
+
+**Outbox + idempotency:** when a categorize call fails (network, server down), the payload is appended to a local outbox in `~/Library/Application Support/miniowl/sync_state.json`. The next successful call replays it. The server is keyed on `last_window_end` so the same window can be sent twice without producing a duplicate row.
 
 ## Features
 
@@ -89,7 +99,24 @@ v2.0 adds an **opt-in** network call: every 20 minutes, miniowl POSTs a compact 
 - **Crash recovery** via a 10 s heartbeat to `state.json` — at most 10 seconds of pending work is lost on `kill -9`
 - **Compact storage**: ~5–8 KB per day gzipped, ~10–15 MB for five years
 - **Zero third-party dependencies** — only Foundation, AppKit, ApplicationServices, ServiceManagement, SwiftUI
-- **v2.0 (opt-in) strategic categorization** — every 20 minutes, the window summary is sent to a categorization API which returns founder-strategic bucket totals (Product / GTM / Strategy / Learning / Admin / Operations / Personal) plus a one-line founder-honest summary. Disabled by default. See [Privacy contract → v2.0](#v20-opt-in--categorization).
+- **v2 strategic categorization (opt-in)** — every 20 minutes the window summary is sent to a categorization API which returns founder-strategic bucket totals (*Product / GTM / Strategy / Learning / Admin / Operations / Personal*) plus a one-line founder-honest summary, mapped onto the **3-circles palette** (Sweet Spot · Joy+Skill trap · Need-only · Personal). Disabled by default.
+- **v2 device pairing (RFC 8628)** — one-time browser-based pairing flow, device tokens stored in the macOS Keychain, revocable from the dashboard at any time. No password ever lives in the app.
+- **v2 cloud-sync toggle** — single dashboard toggle. ON = daily summaries persist on the server. OFF = nothing is stored, and flipping from ON→OFF hard-deletes every saved row for your user immediately.
+- **v2 web dashboard** — see [miniowl.me/dashboard](https://miniowl.me/dashboard) for today's bars, last-7-days 3-circles stacked chart, and 30-day category split.
+- **Resilient sync** — failed categorize calls go to a local outbox and replay on the next successful call. Server-side idempotency keyed on `last_window_end` means duplicate sends never create duplicate rows.
+
+## Pricing & beta status
+
+Miniowl is in **private beta**. While we make sure the category view actually changes how founders work — not just how their menu bar looks — the whole product is **free, no card required**.
+
+| | Today (private beta) | At public launch |
+|---|---|---|
+| **Local tracking + menu bar** | Free | Free, forever |
+| **Cloud sync + web dashboard** | Free | $5/mo |
+
+**Founding-user perk:** if you join during the beta and give feedback, your first 3 months of cloud sync stay free after we open to the public. Our way of saying thanks for the brutally honest feedback.
+
+We are deliberately not building Stripe or a billing flow yet — we want to validate that the dashboard changes behavior before charging. If that bet is wrong, the price was always going to be wrong too.
 
 ## Screenshot
 
@@ -347,22 +374,37 @@ miniowl/
 │   ├── miniowlApp.swift                    # @main + AppDelegate + signal handlers
 │   ├── Coordinator/
 │   │   ├── EventCoordinator.swift          # single-writer actor + merging logic
+│   │   ├── SyncCoordinator.swift           # outbox-pattern actor for v2 sync lifecycle
 │   │   └── PendingEvent.swift              # in-memory value type
 │   ├── Storage/
 │   │   ├── EventLog.swift                  # JSONL append + daily gzip rotation
 │   │   ├── StateFile.swift                 # atomic state.json for crash recovery
-│   │   └── LogReader.swift                 # streaming JSONL → daily totals
+│   │   ├── LogReader.swift                 # streaming JSONL → daily totals
+│   │   ├── CategorizationLog.swift         # v2 cumulative day-level rollup (local)
+│   │   ├── ContextStore.swift              # user-supplied context.md → prompt context
+│   │   └── SyncState.swift                 # outbox JSONL + last_window_end anchor
 │   ├── Watchers/
 │   │   ├── WindowWatcher.swift             # NSWorkspace + Accessibility API
 │   │   ├── AFKWatcher.swift                # CGEventSource idle state machine
 │   │   ├── BrowserWatcher.swift            # pre-compiled AppleScript per browser
 │   │   └── SystemWatcher.swift             # sleep / wake / lock notifications
+│   ├── Categorization/                     # v2 — opt-in network layer
+│   │   ├── CategorizationClient.swift      # ONLY URLSession site (privacy-check enforced)
+│   │   ├── CategoryRollup.swift            # v2 cumulative day rollup logic
+│   │   ├── DayCategorization.swift         # in-memory day model
+│   │   └── Models.swift                    # request/response wire shapes
+│   ├── Pairing/                            # v2 — RFC 8628 device-code flow
+│   │   ├── PairingFlow.swift               # state machine for /pair/start, /pair/poll
+│   │   ├── DeviceTokenStore.swift          # macOS Keychain (kSecClassGenericPassword)
+│   │   └── PairingModels.swift             # wire shapes
 │   ├── Permissions/
 │   │   └── AccessibilityPermission.swift   # AX trust check + open Settings helper
 │   ├── UI/
 │   │   ├── AppState.swift                  # @MainActor orchestrator + timers
 │   │   ├── MenuContent.swift               # popover layout
-│   │   └── TodaySummary.swift              # "Today" totals row
+│   │   ├── MenuRowButton.swift             # shared menu row component
+│   │   ├── CategoryBarsView.swift          # v2 cumulative day bars + 3-circles colors
+│   │   └── TodaySummary.swift              # v1 raw-app fallback view
 │   └── Privacy/
 │       └── ForbiddenImports.swift          # banned-symbol manifest (non-executable)
 ├── scripts/
@@ -441,20 +483,22 @@ The privacy check is just a `grep` for banned API names. Banned symbols live in 
 - **Spotlight does not index ad-hoc-signed apps.** You won't find miniowl via Cmd+Space — that's expected. Use the menu bar icon, or use Raycast / Alfred which have their own indexers.
 - **Watching a video reads as AFK.** No mouse or keyboard input → idle counter ticks → AFK threshold trips. We don't try to fix this; the honest signal is "no input at the keyboard."
 - **Rotation polls every 60 seconds.** A new day's file opens within ~60 seconds of midnight, not exactly at midnight.
-- **No Phase 2 features yet** — no dashboard, no LLM categorization, no server sync, no cloud backup, no exports to other trackers, no calendar integration. These are deliberately deferred. The data format is versioned (`v: 1` in the header) so anything you build on top of it later can detect the schema.
-- **Single-machine only.** No multi-device sync. If you use multiple Macs, you get one log per machine.
+- **No exports / calendar overlay yet.** v2 ships LLM categorization, the web dashboard, and opt-in cloud sync. Calendar overlay, CSV export, and integrations with other trackers are deliberately deferred until we see whether the dashboard alone changes founder behavior.
+- **Single-machine only.** No multi-device sync of raw events. If you use multiple Macs, you get one local log per machine. Cloud sync rolls them up by user, but the raw JSONL stays per-machine.
 
 ## Roadmap (maybe)
 
-These are explicitly not in Phase 1. They may or may not happen depending on whether the data alone turns out to be useful.
+These are explicit *maybes* — they ship only if the private beta validates that the category view actually changes founder behavior.
 
-- A small read-only viewer (HTML or SwiftUI) for past days
-- LLM-based categorization of window titles into work modes
-- Optional Calendar.app overlay so meetings are aligned to focus blocks
-- Stable signing via a self-signed certificate generator script
-- A `.dmg` release in GitHub Releases so people don't have to build from source
+- Per-user category taxonomy (let users edit the 7 buckets to fit their own work)
+- Weekly Sunday-retro email summarizing the past week's 3-circles split
+- Calendar.app overlay so meetings align with focus blocks
+- Sparkle auto-update so beta users don't have to redownload `.dmg` for each version
+- A "kill criteria" page in the dashboard that flags weeks ≥50% Joy+Skill
 
-If you'd find any of these useful, open an issue and say so.
+**Explicitly not on the roadmap, ever:** team plans, screenshots, keystroke logging, mobile app, Windows or Linux ports, social-sharing of categories, gamification / streaks. These are commitments, not omissions — listing them prevents drift.
+
+If you'd find any of the *maybes* useful, open an issue and say so.
 
 ## Contributing
 
@@ -462,7 +506,7 @@ Issues and pull requests welcome. Please:
 
 1. Run `./scripts/check-privacy.sh` before pushing — the build script does this, but it's faster to catch locally.
 2. Don't add third-party dependencies. The project's whole shape is "auditable in one sitting." If you need a library, the bar is "I rewrote it twice and still got it wrong."
-3. Don't add network code. Phase 1 is air-gapped.
+3. Don't add new `URLSession` sites. v2 has *exactly one* — `Sources/miniowl/Categorization/CategorizationClient.swift` — and the privacy script enforces that. New network paths must either route through that file or land in a new dedicated file with explicit privacy review.
 4. Keep watchers off the main thread. AX and AppleScript calls can block for hundreds of milliseconds — main is reserved for SwiftUI.
 
 ## Acknowledgments

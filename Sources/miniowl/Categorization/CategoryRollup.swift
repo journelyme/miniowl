@@ -29,7 +29,8 @@ enum CategoryRollup {
         file: URL,
         window: TimeInterval = defaultWindow,
         now: Date = Date(),
-        timezone: TimeZone = .current
+        timezone: TimeZone = .current,
+        dayCategorization: DayCategorization? = nil
     ) -> CategorizationRequest? {
         guard let content = try? String(contentsOf: file, encoding: .utf8) else {
             return nil
@@ -84,11 +85,26 @@ enum CategoryRollup {
             CategorizationEvent(b: key.b, n: key.n, ti: key.ti, u: key.u, ms: ms)
         }
 
+        // Include cumulative day totals if available — the LLM uses them
+        // to write a natural day-level summary instead of a hardcoded template.
+        var dayTotalsPayload: [DayTotalPayload]? = nil
+        var dayActiveMs: Int64? = nil
+        if let day = dayCategorization, !day.categories.isEmpty {
+            dayTotalsPayload = day.categories.map {
+                DayTotalPayload(name: $0.name, ms: $0.ms, pct: $0.pct)
+            }
+            dayActiveMs = day.totalActiveMs
+        }
+
         return CategorizationRequest(
             tz: timezone.identifier,
             window_start: windowStartMs,
             window_end: nowMs,
-            events: events
+            events: events,
+            day_totals: dayTotalsPayload,
+            day_active_ms: dayActiveMs,
+            week_totals: nil,     // client injects fresh per-request
+            user_context: nil     // client injects fresh per-request
         )
     }
 

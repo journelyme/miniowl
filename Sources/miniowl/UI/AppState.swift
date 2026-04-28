@@ -30,6 +30,19 @@ final class AppState: ObservableObject {
     @Published var rollupError: String?
     @Published var showRawApps = false
 
+    // v2.0 — Pairing flow state.
+    @Published var isPairing = false
+    @Published var pairingState: PairingState?
+    @Published var pairingError: String?
+    /// True from the moment the user clicks "Connect account…" until the
+    /// /pair/start response comes back (or errors). Lets the menu button
+    /// show a spinner + disable itself so rapid clicks can't fire multiple
+    /// pair/start calls.
+    @Published var isConnecting = false
+    /// Brief (~250 ms) disabled window after clicking Sign out so the row
+    /// can't be re-clicked while Keychain delete is in flight.
+    @Published var isSigningOut = false
+
     // ─── Backing ─────────────────────────────────────────────────────
     let dataDir: URL
     let coordinator: EventCoordinator
@@ -45,12 +58,21 @@ final class AppState: ObservableObject {
     private var categorizeTimer: DispatchSourceTimer?
     private var categorizeInflight = false
 
-    /// v2.0 — client config. Re-resolved on demand via `reloadToken()`
-    /// so edits to `token.txt` take effect without an app restart.
-    private var categorizationSettings: CategorizationSettings?
+    /// Context file helper — used by the "Edit context" menu action.
+    /// Context is resolved per-request by the client, not cached.
+    let contextStore: ContextStore
 
-    /// Token file helper — used by the "Edit token" menu action.
-    let tokenStore: TokenStore
+    /// Device token store for Keychain-backed token (RFC 8628 pairing flow).
+    let deviceTokenStore = DeviceTokenStore()
+
+    /// Device authorization flow coordinator.
+    let pairingFlow = PairingFlow()
+
+    /// Outbox for /categorize calls. Every 20-min tick enqueues a window
+    /// here; SyncCoordinator drains it (oldest first, ≤5 per tick) and
+    /// re-tries on the next tick if the server is unreachable. Server-
+    /// side idempotency (migration 035) makes retries safe.
+    let syncCoordinator: SyncCoordinator
 
     /// Persistent categorization log — mirrors EventLog's JSONL-per-day
     /// pattern. Rehydrates `rollup` on startup so the menu isn't empty
@@ -89,6 +111,12 @@ final class AppState: ObservableObject {
         let stateFile = StateFile(directory: dataDir)
         self.coordinator = EventCoordinator(log: log, stateFile: stateFile)
 
+        // Outbox for /categorize calls. Reads any persisted pending
+        // entries from sync_state.json on init so windows enqueued in
+        // a previous session resume on next tick.
+        let syncState = SyncState(directory: dataDir)
+        self.syncCoordinator = SyncCoordinator(syncState: syncState, dataDir: dataDir)
+
         // Watchers.
         self.browserWatcher = BrowserWatcher()
         self.windowWatcher = WindowWatcher(
@@ -98,11 +126,11 @@ final class AppState: ObservableObject {
         self.afkWatcher = AFKWatcher(coordinator: coordinator)
         self.systemWatcher = SystemWatcher(coordinator: coordinator)
 
-        // v2.0 — token file + compile-time URL. Ensure a placeholder
-        // token file exists so the user can find it via "Edit token".
-        self.tokenStore = TokenStore(dataDir: dataDir)
-        tokenStore.initializeIfMissing()
-        self.categorizationSettings = CategorizationSettings.resolve(dataDir: dataDir)
+        // Context file — ensure placeholder exists so the user can find
+        // it via "Edit context…". Not cached — client reads fresh on
+        // every categorize call.
+        self.contextStore = ContextStore(dataDir: dataDir)
+        contextStore.initializeIfMissing()
 
         // v2.0 — persistent categorization log. Prime `rollup` from the
         // last entry so the menu isn't empty after a restart. Silent
@@ -132,15 +160,11 @@ final class AppState: ObservableObject {
         startSummaryRefresh()
         refreshSummaryNow()
 
-        // v2.0 — start categorization timer if configured. First fire is
-        // delayed by 60s to let the user accumulate at least some data
-        // before the first call.
-        if categorizationSettings != nil {
-            startCategorizeTimer()
-            print("miniowl: categorization enabled (every \(Int(categorizeInterval))s)")
-        } else {
-            print("miniowl: categorization disabled (set MINIOWL_CATEGORIZE_URL + MINIOWL_TOKEN to enable)")
-        }
+        // v2.0 — always start the categorize timer. Token is resolved per-
+        // request by the client. If the user has no token configured, each
+        // call fails cleanly and the UI shows "set token" guidance.
+        startCategorizeTimer()
+        print("miniowl: categorization timer armed (every \(Int(categorizeInterval))s)")
 
         // SMAppService.register() is synchronous and very fast once the
         // binary is installed; slow only in the "never run before" case
@@ -181,6 +205,13 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.open(dataDir)
     }
 
+    /// Open the web dashboard in the user's default browser. URL is
+    /// compile-time (dev → localhost:3003, prod → miniowl.me) so a shipped
+    /// build can never be redirected to a different origin.
+    func openDashboard() {
+        NSWorkspace.shared.open(CategorizationSettings.dashboardURL)
+    }
+
     func openAccessibilitySettings() {
         AccessibilityPermission.openSystemSettings()
     }
@@ -189,41 +220,100 @@ final class AppState: ObservableObject {
         SMAppService.openSystemSettingsLoginItems()
     }
 
-    // ─── v2.0 token management ───────────────────────────────────────
-
-    /// True if a token is currently resolved (file or env var). UI uses
-    /// this to label the menu button and show status.
-    var hasToken: Bool { categorizationSettings != nil }
-
     /// Human-readable label of the environment this build targets
     /// ("dev (localhost)" or "production"). Shown in the menu for
     /// transparency — the user should never be surprised about which
     /// backend their data goes to.
     var environmentLabel: String { CategorizationSettings.environmentLabel }
 
-    /// Open the token file in the user's default text editor.
-    func editToken() {
-        tokenStore.openInEditor()
+    /// Open the context file in the user's default text editor. Changes
+    /// take effect on the next categorize call — no reload needed.
+    func editContext() {
+        contextStore.openInEditor()
     }
 
-    /// Re-read the token file after the user saves edits. Immediately
-    /// fires a categorization call so the user can verify the new token
-    /// works without waiting for the 20-minute timer.
-    func reloadToken() {
-        let resolved = CategorizationSettings.resolve(dataDir: dataDir)
-        let wasEnabled = categorizationSettings != nil
-        categorizationSettings = resolved
+    // ─── Pairing flow management ─────────────────────────────────────
 
-        if resolved != nil {
-            rollupError = nil
-            // Start the timer if this is the first valid token we've seen.
-            if !wasEnabled && categorizeTimer == nil {
-                startCategorizeTimer()
+    /// True if the Mac is paired (device token present in Keychain).
+    /// Reads fresh each call — cheap Keychain lookup, ~1ms.
+    var hasDeviceToken: Bool {
+        deviceTokenStore.read() != nil
+    }
+
+    /// Human-readable connection status for the menu
+    var connectionStatus: String {
+        hasDeviceToken ? "Signed in" : "Not connected"
+    }
+
+    /// Start the device pairing flow. The PairingFlow polls in the
+    /// background and calls `onCompletion` exactly once when it terminates
+    /// (success OR failure), so we always unstick the "Waiting to pair…" UI.
+    ///
+    /// `isConnecting` is flipped true immediately and cleared only after
+    /// the /pair/start response (success or error) lands. The menu button
+    /// disables itself during that window so rapid clicks can't fire
+    /// duplicate pair_code rows at the server.
+    func connectAccount() {
+        guard !isConnecting && !isPairing else { return }
+        isConnecting = true
+        pairingError = nil
+
+        Task {
+            do {
+                let state = try await pairingFlow.startPairing { @MainActor failureMessage in
+                    self.isPairing = false
+                    self.pairingState = nil
+                    // nil = success → no banner. Non-nil = surface to user.
+                    self.pairingError = failureMessage
+                }
+
+                await MainActor.run {
+                    self.isConnecting = false
+                    self.isPairing = true
+                    self.pairingState = state
+                }
+            } catch {
+                await MainActor.run {
+                    self.isConnecting = false
+                    self.pairingError = error.localizedDescription
+                    self.isPairing = false
+                    self.pairingState = nil
+                }
+                print("miniowl: pairing failed: \(error)")
             }
-            Task { await runCategorizeOnce() }
-        } else {
-            rollup = nil
-            rollupError = "no token — set one via Edit token"
+        }
+    }
+
+    /// Cancel the current pairing flow
+    func cancelPairing() {
+        Task {
+            await pairingFlow.cancelPairing()
+            await MainActor.run {
+                self.isPairing = false
+                self.pairingState = nil
+                self.pairingError = nil
+            }
+        }
+    }
+
+    /// Sign out - remove device token from Keychain.
+    /// Brief disabled window so rapid re-click can't race.
+    func signOut() {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        Task {
+            do {
+                try deviceTokenStore.delete()
+                print("miniowl: signed out successfully")
+            } catch {
+                print("miniowl: sign out failed: \(error)")
+            }
+            // Small UX beat — user sees "yes, you did that" instead of a
+            // jarringly-instant state flip.
+            try? await Task.sleep(for: .milliseconds(250))
+            await MainActor.run {
+                self.isSigningOut = false
+            }
         }
     }
 
@@ -309,14 +399,22 @@ final class AppState: ObservableObject {
         self.categorizeTimer = t
     }
 
-    /// One round-trip to the categorization API. No-op if v2 is disabled,
-    /// paused, or another call is in-flight (single-flight semantics).
-    /// Caller-safe to invoke from anywhere; runs on the global queue.
+    /// One categorize "tick". Enqueues the current 20-min window into
+    /// the outbox and drains up to 5 oldest pending windows.
+    ///
+    /// No-op if paused or another tick is already running (single-flight
+    /// at the AppState level — SyncCoordinator's actor isolation also
+    /// serializes the inner work). Network failures don't lose data:
+    /// pending entries stay in sync_state.json and retry next tick.
+    /// Server-side idempotency (migration 035) means a re-sent window
+    /// is a no-op on the server, never double-counts.
     func runCategorizeOnce() async {
-        guard let settings = categorizationSettings else { return }
         if paused { return }
 
-        // Single-flight: bail if a call is already in progress.
+        // Single-flight at the AppState level. We still go through the
+        // SyncCoordinator actor for actual queue mutations, but this
+        // bail-out keeps two overlapping tick fires from doing redundant
+        // work (e.g. timer firing while a manual trigger is mid-drain).
         let alreadyRunning = await MainActor.run { () -> Bool in
             if categorizeInflight { return true }
             categorizeInflight = true
@@ -327,51 +425,69 @@ final class AppState: ObservableObject {
             Task { @MainActor in self.categorizeInflight = false }
         }
 
-        // Build the request from today's on-disk events. If the file is
-        // empty (no activity), skip the call entirely.
-        let today = DateUtils.localDateString(for: Date())
+        // Snapshot current day totals (so the LLM can write a natural
+        // day_summary referencing them) and the live window timing.
+        let now = Date()
+        let today = DateUtils.localDateString(for: now)
         let file = dataDir.appendingPathComponent("\(today).mow")
-        guard let req = CategoryRollup.buildRequest(file: file) else {
-            return
+        let currentDayData = await MainActor.run { self.dayCategorization }
+
+        // Compute the current window's [start, end] in Unix-ms. We use
+        // CategoryRollup.defaultWindow so the outbox entry matches what
+        // the client would have built today. Empty windows are skipped
+        // — no point enqueueing a payload with zero events.
+        let windowSeconds = CategoryRollup.defaultWindow
+        let endMs = Int64(now.timeIntervalSince1970 * 1000)
+        let startMs = Int64((now.timeIntervalSince1970 - windowSeconds) * 1000)
+
+        // Skip enqueue if the file has no events covering this window —
+        // saves us a wasted server round-trip and a no-op pending entry.
+        let hasActivity = CategoryRollup.buildRequest(
+            file: file,
+            window: windowSeconds,
+            now: now,
+            timezone: .current,
+            dayCategorization: currentDayData
+        ) != nil
+        if hasActivity {
+            await syncCoordinator.enqueue(
+                startMs: startMs,
+                endMs: endMs,
+                tz: TimeZone.current.identifier
+            )
         }
 
-        let client = CategorizationClient(settings: settings)
-        do {
-            let resp = try await client.categorize(req)
-            let cached = CachedRollup(response: resp, computedAt: Date())
+        // Always drain — even if the live window had nothing, prior
+        // pending entries from a network outage might be ready to ship.
+        let client = CategorizationClient(dataDir: dataDir)
+        let outcome = await syncCoordinator.drain(
+            client: client,
+            log: categorizationLog,
+            currentDayData: currentDayData
+        )
 
-            // Persist BEFORE publishing to @Published so a crash between
-            // the two doesn't lose the row. File I/O runs on the current
-            // utility queue (outside the main actor).
-            do {
-                try categorizationLog.append(cached, request: req)
-            } catch {
-                fputs("miniowl: categorization log append failed: \(error)\n", stderr)
-            }
+        // Recompute cumulative day totals from ALL today's entries (this
+        // includes the freshly-synced windows from the drain, if any).
+        let dayData = categorizationLog.readToday()
 
-            // Recompute cumulative day totals from ALL today's entries.
-            let dayData = categorizationLog.readToday()
-
-            await MainActor.run {
+        await MainActor.run {
+            if let cached = outcome.latestSynced {
                 self.rollup = cached
-                self.dayCategorization = dayData
+            }
+            self.dayCategorization = dayData
+            // Surface error only if NOTHING drained successfully this
+            // tick. Partial drains (some succeeded, then later failed)
+            // shouldn't show an error — the user is making progress.
+            if outcome.latestSynced != nil {
                 self.rollupError = nil
+            } else if let err = outcome.lastError {
+                self.rollupError = err.errorDescription ?? "\(err)"
             }
-        } catch {
-            // Fail-soft: keep showing the last good rollup if any, surface
-            // a one-line error in the UI for transparency.
-            await MainActor.run {
-                self.rollupError = (error as? CategorizationError)?.errorDescription
-                    ?? "\(error)"
-            }
-            fputs("miniowl: categorize failed: \(error)\n", stderr)
         }
-    }
 
-    /// Called by the menu so the user can force a refresh without waiting
-    /// for the next 20-minute tick.
-    func categorizeNow() {
-        Task { await runCategorizeOnce() }
+        if let err = outcome.lastError {
+            fputs("miniowl: categorize drain stopped (pending=\(outcome.pendingCount)): \(err)\n", stderr)
+        }
     }
 
     /// Quit and immediately relaunch /Applications/miniowl.app. The
@@ -399,6 +515,14 @@ final class AppState: ObservableObject {
         let today = DateUtils.localDateString(for: Date())
         let url = dataDir.appendingPathComponent("\(today).mow")
         self.summary = LogReader.summarize(file: url)
+    }
+
+    /// Re-read today's .cats.jsonl and update the day view. Clears stale
+    /// yesterday data on day-change (file doesn't exist yet → nil).
+    /// Cost: ~1ms for a 35KB daily file. Called on popover onAppear so
+    /// the user never sees yesterday's bars on a new day.
+    func refreshDayCategorization() {
+        self.dayCategorization = categorizationLog.readToday()
     }
 
     // ─── Auto-launch ─────────────────────────────────────────────────
