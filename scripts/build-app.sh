@@ -111,11 +111,13 @@ if [[ "${MINIOWL_BUILD_NATIVE_ONLY:-}" == "1" ]]; then
 fi
 
 echo "building miniowl (release) [env: $BUILD_ENV_LABEL · arch: $ARCH_LABEL]..."
-if [[ ${#BUILD_FLAGS[@]} -gt 0 || ${#ARCH_FLAGS[@]} -gt 0 ]]; then
-  swift build -c release "${ARCH_FLAGS[@]}" "${BUILD_FLAGS[@]}"
-else
-  swift build -c release
-fi
+# Expand each array only if it has elements. `${ARR[@]+"${ARR[@]}"}`
+# is the canonical bash idiom for "expand if set, nothing if empty"
+# under `set -u` — `${ARR[@]:-}` would inject an empty string arg
+# that swift build rejects as 'Unexpected argument'.
+swift build -c release \
+  ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} \
+  ${BUILD_FLAGS[@]+"${BUILD_FLAGS[@]}"}
 
 # Universal builds land in .build/apple/Products/Release/; single-arch
 # builds in .build/release/. Use the universal output if it exists.
