@@ -93,17 +93,96 @@ echo "      $STAGING:"
 ls -la "$STAGING/" | sed 's/^/        /'
 echo ""
 
-# ── Step 4: build the .dmg ───────────────────────────────────────────
-echo "[4/8] creating .dmg with hdiutil..."
+# ── Step 4: build the styled .dmg ───────────────────────────────────
+#
+# Two-phase build so we can run osascript layout against a writable
+# disk image before flattening to compressed read-only:
+#   4a. Create writable UDRW disk image, mount it.
+#   4b. Drop the background PNG into a hidden .background folder.
+#   4c. Apply Finder window settings via osascript: window size, icon
+#       view, 128px icons, background image, fixed positions for
+#       miniowl.app and the Applications shortcut.
+#   4d. Detach + convert to compressed read-only UDZO with zlib level 9.
+#
+# Same pattern Raycast / Maccy / AltTab / 1Password use. Falls back to
+# plain UDZO if assets/dmg-background.png is missing so the script
+# still ships a working DMG even after a partial checkout.
+echo "[4/8] creating styled .dmg..."
 mkdir -p "$RELEASE_DIR"
 rm -f "$DMG"
-hdiutil create \
-  -volname "$VOLUME_NAME" \
-  -srcfolder "$STAGING" \
-  -ov \
-  -format UDZO \
-  "$DMG" \
-  | sed 's/^/      /'
+
+DMG_BG="assets/dmg-background.png"
+RW_DMG="/tmp/miniowl-rw-$$.dmg"
+
+if [[ -f "$DMG_BG" ]]; then
+  # 4a — create writable image, sized to fit .app + background + headroom.
+  RW_SIZE_MB=$(( $(du -sm "$STAGING" | awk '{print $1}') + 4 ))
+  hdiutil create \
+    -volname "$VOLUME_NAME" \
+    -srcfolder "$STAGING" \
+    -fs HFS+ \
+    -fsargs "-c c=64,a=16,e=16" \
+    -format UDRW \
+    -size "${RW_SIZE_MB}m" \
+    "$RW_DMG" \
+    | sed 's/^/      /'
+
+  # Mount the writable DMG. -noautoopen avoids a Finder window flash.
+  DEVICE=$(hdiutil attach -readwrite -noverify -noautoopen "$RW_DMG" | grep -E '^/dev/' | head -1 | awk '{print $1}')
+  MOUNT="/Volumes/$VOLUME_NAME"
+  echo "      mounted: $DEVICE → $MOUNT"
+
+  # 4b — copy the background PNG into a hidden folder Finder reads from.
+  mkdir -p "$MOUNT/.background"
+  cp "$DMG_BG" "$MOUNT/.background/dmg-background.png"
+
+  # 4c — apply Finder window layout. The osascript runs inline because
+  # using a separate file would need a roundtrip path resolution we can
+  # avoid. Coordinates: 560×400 logical window, icon centers at
+  # (160, 200) and (400, 200). Matches what make-dmg-bg.swift draws.
+  osascript <<APPLESCRIPT
+    tell application "Finder"
+      tell disk "$VOLUME_NAME"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set sidebar width of container window to 0
+        set bounds of container window to {200, 200, 760, 600}
+        set viewOpts to the icon view options of container window
+        set arrangement of viewOpts to not arranged
+        set icon size of viewOpts to 128
+        set text size of viewOpts to 12
+        set background picture of viewOpts to file ".background:dmg-background.png"
+        set position of item "miniowl.app" of container window to {160, 200}
+        set position of item "Applications" of container window to {400, 200}
+        close
+        open
+        update without registering applications
+        delay 1
+      end tell
+    end tell
+APPLESCRIPT
+
+  # Force Finder to flush the .DS_Store with our settings before unmount.
+  sync
+
+  # 4d — unmount + convert to compressed read-only.
+  hdiutil detach "$DEVICE" -quiet || hdiutil detach "$DEVICE" -force
+  hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$DMG" \
+    | sed 's/^/      /'
+  rm -f "$RW_DMG"
+else
+  echo "      warning: $DMG_BG not found — building plain DMG without window styling"
+  echo "      (run \`swift tools/make-dmg-bg.swift\` to regenerate)"
+  hdiutil create \
+    -volname "$VOLUME_NAME" \
+    -srcfolder "$STAGING" \
+    -ov \
+    -format UDZO \
+    "$DMG" \
+    | sed 's/^/      /'
+fi
 echo ""
 
 # ── Step 5: sign the .dmg itself with the same Developer ID ─────────

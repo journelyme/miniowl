@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-04-28
+
+First-day post-launch UX fixes from real-user testing of v2.0.0. No
+behavior changes to the categorize / cloud-sync paths — just the
+install / pair / first-impression rough edges users hit.
+
+### Fixed
+
+- **OAuth pair flow loses return path** — `/login` now passes the
+  `return_to` query param through the Supabase OAuth round-trip as
+  `?next=` on the `/auth/callback` URL. Previously a user who clicked
+  *Connect account* without being signed in landed on the home page
+  after Google sign-in instead of the pair confirmation screen, and
+  had to start over from the Mac.
+- **Pair success page lands on home, not dashboard** — `/pair/success`
+  now routes the primary CTA to `/dashboard` (where the cloud-sync
+  toggle and category bars live) and auto-redirects after 6 s for
+  users who don't click. Home was an empty page for paired users.
+
+### Changed
+
+- **Mac app icon redesigned to match website logo.** Replaces the
+  prior owl-on-night-sky gradient with the website's flat-black
+  squircle + white eyes + amber beak design. 1:1 port of
+  `apps/miniowl/public/logo.svg` rendered at 1024×1024. Uses
+  design-system tokens exactly: `#0C0A09` background, `#FAFAF9`
+  sclera/highlights, `#D97706` accent beak.
+- **Context template rewritten with a fully-filled fictional founder
+  example.** Previously the template was empty placeholders ("e.g.
+  …") that users left blank. Now it's a complete realistic example
+  matching the structure of a power-user's context — projects, GTM
+  activities, ideal allocations (35–45% Product etc.), failing
+  patterns ("GTM < 10% → Joy+Skill trap"), winning patterns. Users
+  who don't edit at least give the LLM a reasonable persona; users
+  who edit get best-in-class personalization.
+- **DMG window has world-class layout.** New `tools/make-dmg-bg.swift`
+  renders a 560×400 background with design-system colors and a
+  dashed amber arrow from the .app to the Applications shortcut.
+  `tools/make-dmg.sh` now applies osascript window styling: 128 px
+  icons, fixed positions for `miniowl.app` and `Applications`, no
+  toolbar / sidebar / status bar. Same install-window pattern as
+  Raycast / Maccy / Linear / 1Password. Falls back to the plain
+  unstyled DMG if `assets/dmg-background.png` is absent.
+
 ## [2.0.0] — 2026-04-28
 
 Miniowl 2.0 — strategic categorization & opt-in cloud sync. The product

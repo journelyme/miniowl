@@ -76,39 +76,80 @@ struct ContextStore {
         if FileManager.default.fileExists(atPath: fileURL.path) { return }
 
         let placeholder = """
-        # My Miniowl Context
+        # Context for Miniowl categorization
 
-        > This file lets you personalize how Miniowl categorizes your time.
-        > The server reads this on every categorize call (no reload needed).
-        > Max 2 KB. Empty file = use defaults.
-        >
-        > Tell Miniowl about your work, projects, and preferences.
-        > Edit this file anytime — changes take effect on the next 20-min tick.
+        > EDIT THIS FILE. The example below is a fictional solo founder named
+        > Alex — keep the structure, replace every value with your own work.
+        > The server reads this on every categorize call (no app reload needed).
+        > Max 2 KB. Empty = use defaults; the more specific you are, the
+        > sharper the categorization gets.
 
         ## Who I am
 
-        (e.g. "I'm a solo founder / engineer at BigCo / freelance designer")
+        Solo bootstrapped founder building Acme Ledger, a B2B SaaS for
+        small accounting firms. Pre-PMF, ~$2K MRR. Mac-only, terminal-heavy.
+        Cold outreach drains me — I need this tool to flag when I'm hiding
+        in code instead of talking to users.
 
-        ## My projects (map to Product category)
+        ## My projects
 
-        (list project names or repo names — e.g. "acme-saas, mobile-app")
+        - Acme Ledger — primary product (acme-ledger repo, acme.com)
+        - acme-marketing — landing page + Substack
+        - lab-experiments — side learning, NOT a real project
 
         ## My GTM / outreach activities
 
-        (things you do for marketing/sales that shouldn't be miscategorized —
-         e.g. "Writing on my Substack, DMing users on Twitter, weekly newsletter")
+        - IndieHackers DMs and posts
+        - Twitter/X replies and DMs to other founders
+        - User interviews on Zoom, Google Meet
+        - Reddit posts in r/SaaS, r/EntrepreneurRideAlong
+        - Substack: weekly "Margin Notes" newsletter
+        - LinkedIn comments (not posts — too much noise)
 
-        ## My learning activities
+        ## My Strategy activities
 
-        (books, courses, podcasts — what Learning looks like for you)
+        - Business: pricing, positioning, lean canvas, escape velocity, MOAT
+        - Research: competitors, market trends, funding landscape
+        - Reading strategy books (Walling, Maurya, Bush) → Strategy, NOT Learning
 
-        ## Tone preference
+        ## My Learning activities
 
-        (e.g. "Honest and direct, don't soften. Use 'you' not 'we'.")
+        - Tech tutorials, framework docs, language books
+        - Podcasts (founder + tech)
+        - General reading not tied to a current decision
 
-        ## Special rules
+        ## My tone preference
 
-        (anything specific — e.g. "Slack with my users = GTM, not Operations")
+        Direct and brutally honest. Don't soften. If I'm 70% Product and 5%
+        GTM, say "Joy+Skill trap" — that's the vocabulary I use with myself.
+        Use "you" not "we". Slight discomfort is the value; if the summary
+        feels comfortable, it's probably wrong. Founder-tribal language is
+        fine (Joy+Skill trap, Sweet Spot, 3-circles).
+
+        ## My ideal allocation (weekday targets)
+
+        When writing day_summary, compare against these and flag when off:
+
+        - Product: 35–45% (building is fine, but capped)
+        - GTM: 25–35% (the under-done bucket — flag if below 15%)
+        - Strategy: 10–15%
+        - Learning: 5–10% (flag if >30% on weekday — avoidance)
+        - Admin: 5%
+        - Operations: 5%
+        - Personal: 5–15% on workdays, more on weekends (fine)
+
+        ## Failing patterns (flag explicitly)
+
+        - GTM < 10% → Joy+Skill trap
+        - Product > 60% with GTM < 15% → classic avoidance pattern
+        - Learning > 30% on weekday → "preparing instead of doing"
+        - Personal > 30% during 10am–6pm → probably distracted
+
+        ## Winning patterns (celebrate explicitly)
+
+        - GTM ≥ 25% (outreach, interviews, content shipped)
+        - Any user interview completed
+        - Strategy + GTM together > Product + Learning
         """
         try? placeholder.write(to: fileURL, atomically: true, encoding: .utf8)
     }

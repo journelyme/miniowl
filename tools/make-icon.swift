@@ -1,20 +1,35 @@
 #!/usr/bin/env swift
 
 // ─────────────────────────────────────────────────────────────────────
-// make-icon.swift — draw the miniowl app icon programmatically.
+// make-icon.swift — render the miniowl app icon programmatically.
 //
-// Run via tools/make-icon.sh — this file just renders the master 1024px
-// PNG; the wrapper script handles all the resampling + iconutil work.
+// 1:1 port of the website logo at apps/miniowl/public/logo.svg, scaled
+// from a 64×64 viewBox to a 1024×1024 master PNG. Colors are pulled
+// straight from the design system tokens (apps/miniowl design-system):
+//   --color-gray-950 #0C0A09   — squircle background + pupils
+//   --color-gray-50  #FAFAF9   — sclera + eye highlights
+//   --color-accent   #D97706   — signature amber for the beak
 //
-// The icon is a stylized owl face on a deep-night gradient: a large
-// squircle background with two big round "eyes" and a tiny triangular
-// beak. Pure Core Graphics, no assets, no dependencies.
+// No gradients, no stars, no inner shadow. Threads-minimal — exactly
+// what the website ships. Run via tools/make-icon.sh; this file just
+// produces the master PNG (the wrapper handles resampling + iconutil).
 // ─────────────────────────────────────────────────────────────────────
 
 import AppKit
 import CoreGraphics
 
+// Render at the same 1024 master size the .icns pipeline expects.
+// Geometry below is expressed against a 64-unit logical viewBox to
+// match the SVG, then multiplied by `unit` for actual pixels.
 let size: CGFloat = 1024
+let unit: CGFloat = size / 64
+
+// Design-system colors.
+let bgColor      = CGColor(red:  12/255.0, green:  10/255.0, blue:  9/255.0, alpha: 1.0) // #0C0A09
+let scleraColor  = CGColor(red: 250/255.0, green: 250/255.0, blue: 249/255.0, alpha: 1.0) // #FAFAF9
+let pupilColor   = bgColor                                                                  // matches bg
+let accentColor  = CGColor(red: 217/255.0, green: 119/255.0, blue:   6/255.0, alpha: 1.0) // #D97706
+
 let image = NSImage(size: NSSize(width: size, height: size))
 image.lockFocus()
 
@@ -23,140 +38,75 @@ guard let ctx = NSGraphicsContext.current?.cgContext else {
     exit(1)
 }
 
-// ─── Background: macOS-style squircle with night-sky gradient ────────
-let rect = CGRect(x: 0, y: 0, width: size, height: size)
-let cornerRadius: CGFloat = size * 0.2237  // matches macOS app icon spec
+// CG origin is bottom-left, SVG origin is top-left. This helper does
+// the y-flip per the SVG → CG conversion: cgY = size - svgY.
+func y(_ svgY: CGFloat) -> CGFloat { size - svgY * unit }
+func x(_ svgX: CGFloat) -> CGFloat { svgX * unit }
+
+// ─── Squircle background ────────────────────────────────────────────
+// SVG uses rx=14 on a 64×64 rect → corner radius = 14 * unit.
+// macOS app-icon spec radius is 22.37%; 14/64 = 21.875% — close
+// enough that the icon still sits comfortably inside the macOS mask.
+let bgRect = CGRect(x: 0, y: 0, width: size, height: size)
+let cornerRadius: CGFloat = 14 * unit
 let bgPath = CGPath(
-    roundedRect: rect,
+    roundedRect: bgRect,
     cornerWidth: cornerRadius,
     cornerHeight: cornerRadius,
     transform: nil
 )
 
-ctx.saveGState()
 ctx.addPath(bgPath)
-ctx.clip()
+ctx.setFillColor(bgColor)
+ctx.fillPath()
 
-let gradColors = [
-    CGColor(red: 0.07, green: 0.10, blue: 0.18, alpha: 1.0),  // deep navy
-    CGColor(red: 0.16, green: 0.22, blue: 0.34, alpha: 1.0),  // slate
-    CGColor(red: 0.32, green: 0.38, blue: 0.52, alpha: 1.0),  // soft blue-grey
-] as CFArray
-let gradLocations: [CGFloat] = [0.0, 0.55, 1.0]
-let gradient = CGGradient(
-    colorsSpace: CGColorSpaceCreateDeviceRGB(),
-    colors: gradColors,
-    locations: gradLocations
-)!
-ctx.drawLinearGradient(
-    gradient,
-    start: CGPoint(x: 0, y: size),
-    end: CGPoint(x: 0, y: 0),
-    options: []
-)
+// ─── Eyes ───────────────────────────────────────────────────────────
+// Direct port of:
+//   <circle cx="22" cy="28" r="9" fill="#FAFAF9"/>   // outer / sclera
+//   <circle cx="22" cy="28" r="5" fill="#0C0A09"/>   // pupil
+//   <circle cx="24" cy="26" r="1.6" fill="#FAFAF9"/> // highlight
+// Mirrored on cx=42 for the right eye.
+func drawEye(svgCX: CGFloat, svgCY: CGFloat, highlightDX: CGFloat, highlightDY: CGFloat) {
+    let cx = x(svgCX)
+    let cy = y(svgCY)
+    let scleraR: CGFloat = 9 * unit
+    let pupilR:  CGFloat = 5 * unit
+    let highR:   CGFloat = 1.6 * unit
 
-// ─── Stars (tiny dots) for character ─────────────────────────────────
-let starPositions: [(CGFloat, CGFloat, CGFloat)] = [
-    (0.12, 0.78, 4),
-    (0.22, 0.88, 2.5),
-    (0.78, 0.85, 3),
-    (0.88, 0.74, 2),
-    (0.16, 0.62, 2),
-    (0.86, 0.62, 3),
-]
-ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.55))
-for (xRatio, yRatio, r) in starPositions {
-    let cx = size * xRatio
-    let cy = size * yRatio
-    ctx.fillEllipse(in: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+    // Sclera
+    ctx.setFillColor(scleraColor)
+    ctx.fillEllipse(in: CGRect(x: cx - scleraR, y: cy - scleraR, width: scleraR * 2, height: scleraR * 2))
+
+    // Pupil
+    ctx.setFillColor(pupilColor)
+    ctx.fillEllipse(in: CGRect(x: cx - pupilR, y: cy - pupilR, width: pupilR * 2, height: pupilR * 2))
+
+    // Highlight (small white dot, offset toward upper-outside of pupil)
+    let hx = x(svgCX + highlightDX)
+    let hy = y(svgCY + highlightDY)
+    ctx.setFillColor(scleraColor)
+    ctx.fillEllipse(in: CGRect(x: hx - highR, y: hy - highR, width: highR * 2, height: highR * 2))
 }
 
-// ─── Owl eyes ────────────────────────────────────────────────────────
-// Two big round eyes side by side. White sclera, dark iris, white catchlight.
-let eyeY: CGFloat = size * 0.46
-let eyeR: CGFloat = size * 0.20
-let eyeDX: CGFloat = size * 0.215  // half the gap between eye centers
+// SVG highlight offsets:
+//   left eye:  (24, 26) vs (22, 28) → +2x, -2y
+//   right eye: (44, 26) vs (42, 28) → +2x, -2y
+drawEye(svgCX: 22, svgCY: 28, highlightDX: 2, highlightDY: -2)
+drawEye(svgCX: 42, svgCY: 28, highlightDX: 2, highlightDY: -2)
 
-func drawEye(centerX cx: CGFloat) {
-    // White sclera with subtle glow rim
-    let scleraRect = CGRect(x: cx - eyeR, y: eyeY - eyeR, width: eyeR * 2, height: eyeR * 2)
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1.0))
-    ctx.fillEllipse(in: scleraRect)
-
-    // Iris
-    let irisR = eyeR * 0.62
-    let irisRect = CGRect(x: cx - irisR, y: eyeY - irisR, width: irisR * 2, height: irisR * 2)
-    let irisColors = [
-        CGColor(red: 0.13, green: 0.18, blue: 0.27, alpha: 1.0),
-        CGColor(red: 0.05, green: 0.07, blue: 0.12, alpha: 1.0),
-    ] as CFArray
-    let irisGrad = CGGradient(
-        colorsSpace: CGColorSpaceCreateDeviceRGB(),
-        colors: irisColors,
-        locations: [0, 1]
-    )!
-    ctx.saveGState()
-    ctx.addEllipse(in: irisRect)
-    ctx.clip()
-    ctx.drawRadialGradient(
-        irisGrad,
-        startCenter: CGPoint(x: cx, y: eyeY + irisR * 0.3),
-        startRadius: 0,
-        endCenter: CGPoint(x: cx, y: eyeY),
-        endRadius: irisR,
-        options: []
-    )
-    ctx.restoreGState()
-
-    // Catchlight (small white highlight)
-    let chR = eyeR * 0.13
-    let chRect = CGRect(
-        x: cx - chR + eyeR * 0.18,
-        y: eyeY - chR + eyeR * 0.22,
-        width: chR * 2,
-        height: chR * 2
-    )
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.95))
-    ctx.fillEllipse(in: chRect)
-
-    // Smaller secondary catchlight
-    let ch2R = eyeR * 0.06
-    let ch2Rect = CGRect(
-        x: cx - ch2R - eyeR * 0.05,
-        y: eyeY - ch2R + eyeR * 0.05,
-        width: ch2R * 2,
-        height: ch2R * 2
-    )
-    ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.7))
-    ctx.fillEllipse(in: ch2Rect)
-}
-
-drawEye(centerX: size * 0.5 - eyeDX)
-drawEye(centerX: size * 0.5 + eyeDX)
-
-// ─── Beak (small triangle below the eyes) ────────────────────────────
-let beakTop = eyeY - eyeR * 0.95
-let beakBottom = beakTop - size * 0.10
-let beakHalfWidth = size * 0.045
+// ─── Beak ───────────────────────────────────────────────────────────
+// Direct port of:
+//   <path d="M32 39 L28 45 L36 45 Z" fill="#D97706"/>
+// Triangle apex at (32, 39), base from (28, 45) to (36, 45).
 let beakPath = CGMutablePath()
-beakPath.move(to: CGPoint(x: size * 0.5, y: beakBottom))
-beakPath.addLine(to: CGPoint(x: size * 0.5 - beakHalfWidth, y: beakTop))
-beakPath.addLine(to: CGPoint(x: size * 0.5 + beakHalfWidth, y: beakTop))
+beakPath.move(to:    CGPoint(x: x(32), y: y(39)))
+beakPath.addLine(to: CGPoint(x: x(28), y: y(45)))
+beakPath.addLine(to: CGPoint(x: x(36), y: y(45)))
 beakPath.closeSubpath()
 
 ctx.addPath(beakPath)
-ctx.setFillColor(CGColor(red: 0.95, green: 0.78, blue: 0.35, alpha: 1.0))
+ctx.setFillColor(accentColor)
 ctx.fillPath()
-
-ctx.restoreGState()
-
-// ─── Subtle inner shadow on the squircle edge for depth ──────────────
-ctx.saveGState()
-ctx.addPath(bgPath)
-ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.25))
-ctx.setLineWidth(2)
-ctx.strokePath()
-ctx.restoreGState()
 
 image.unlockFocus()
 
