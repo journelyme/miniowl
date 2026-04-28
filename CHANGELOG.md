@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-04-28
+
+Universal binary release. v2.0.0 and v2.0.1 shipped arm64-only DMGs
+because `swift build` defaults to the host architecture and the build
+machine is Apple Silicon — meaning the LP's "Apple Silicon & Intel"
+claim was technically false: Intel Macs would refuse to launch the
+.app with an "incompatible CPU" error.
+
+### Fixed
+
+- **`scripts/build-app.sh` now produces a universal binary** by default
+  (arm64 + x86_64 lipo'd together). The .app runs natively on every
+  Mac that meets the macOS 14 minimum, no Rosetta hop. Output path is
+  `.build/apple/Products/Release/miniowl` for universal builds; the
+  script falls back to `.build/release/miniowl` for single-arch
+  builds. DMG size goes from ~870 KB → ~1.5 MB; still trivial.
+- Set `MINIOWL_BUILD_NATIVE_ONLY=1` for single-arch dev iteration if
+  the cross-compile compile time bothers you.
+
+### Verification
+
+```
+$ lipo -info build/miniowl.app/Contents/MacOS/miniowl
+Architectures in the fat file: build/miniowl.app/Contents/MacOS/miniowl
+  are: x86_64 arm64
+```
+
 ## [2.0.1] — 2026-04-28
 
 First-day post-launch UX fixes from real-user testing of v2.0.0. No

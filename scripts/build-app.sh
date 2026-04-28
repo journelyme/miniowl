@@ -97,14 +97,32 @@ echo "      kind:   $SIGN_KIND"
 echo ""
 
 # 2. Compile release binary via SPM.
-echo "building miniowl (release) [env: $BUILD_ENV_LABEL]..."
-if [[ ${#BUILD_FLAGS[@]} -gt 0 ]]; then
-  swift build -c release "${BUILD_FLAGS[@]}"
+#
+# We default to a universal binary (arm64 + x86_64) so the .app runs
+# natively on Apple Silicon AND Intel Macs without a Rosetta hop. The
+# size penalty is ~600 KB total — negligible for a 1500-LOC Swift app
+# with no deps. For fast dev iteration (single-arch host build),
+# export MINIOWL_BUILD_NATIVE_ONLY=1.
+ARCH_FLAGS=(--arch arm64 --arch x86_64)
+ARCH_LABEL="universal (arm64 + x86_64)"
+if [[ "${MINIOWL_BUILD_NATIVE_ONLY:-}" == "1" ]]; then
+  ARCH_FLAGS=()
+  ARCH_LABEL="native ($(uname -m)) — MINIOWL_BUILD_NATIVE_ONLY=1"
+fi
+
+echo "building miniowl (release) [env: $BUILD_ENV_LABEL · arch: $ARCH_LABEL]..."
+if [[ ${#BUILD_FLAGS[@]} -gt 0 || ${#ARCH_FLAGS[@]} -gt 0 ]]; then
+  swift build -c release "${ARCH_FLAGS[@]}" "${BUILD_FLAGS[@]}"
 else
   swift build -c release
 fi
 
-BIN=".build/release/miniowl"
+# Universal builds land in .build/apple/Products/Release/; single-arch
+# builds in .build/release/. Use the universal output if it exists.
+BIN=".build/apple/Products/Release/miniowl"
+if [[ ! -f "$BIN" ]]; then
+  BIN=".build/release/miniowl"
+fi
 APP="build/miniowl.app"
 
 if [[ ! -f "$BIN" ]]; then
