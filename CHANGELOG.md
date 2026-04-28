@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.3] — 2026-04-29
+
+Production URL migration. The single shared gateway moved from
+api.contextly.me → api.journely.me as part of the Journely-LLC-wide
+domain consolidation onto journely.me. Pure URL change — zero behavior
+changes to categorize, pairing, sync, or privacy paths.
+
+### Changed
+
+- **`Sources/miniowl/Categorization/CategorizationClient.swift`** — production
+  `baseURL` (the compile-time URL the Mac client posts categorize +
+  pair/start + pair/poll requests to) updated from
+  `https://api.contextly.me/api/v1/miniowl` to
+  `https://api.journely.me/api/v1/miniowl`. The `MINIOWL_DEV` flag still
+  flips dev builds to localhost.
+
+### Compatibility
+
+v2.0.0–2.0.2 DMGs in the field continue working unchanged: api.contextly.me
+remains on the same Railway gateway as a parallel custom domain. Phase 4
+decommission of contextly.me will happen only after install telemetry
+shows v2.0.3+ adoption above ~80% of active users for 30+ days.
+
+### Verification
+
+```
+$ codesign -dvv build/miniowl.app | grep Authority
+Authority=Developer ID Application: JOURNELY LLC (APGC7K5255)
+
+$ lipo -info build/miniowl.app/Contents/MacOS/miniowl
+Architectures in the fat file: ... are: x86_64 arm64
+
+$ spctl -a -v release/miniowl-2.0.3.dmg
+release/miniowl-2.0.3.dmg: accepted
+source=Notarized Developer ID
+```
+
 ## [2.0.2] — 2026-04-28
 
 Universal binary release. v2.0.0 and v2.0.1 shipped arm64-only DMGs

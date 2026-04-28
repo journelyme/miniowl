@@ -41,11 +41,18 @@ enum CategorizationError: Error, LocalizedError {
 struct CategorizationSettings {
     /// Base API URL. Flipped by the `-DMINIOWL_DEV` flag in
     /// `scripts/build-app.sh --dev`. Default = production.
+    ///
+    /// Production points at api.journely.me as of v2.0.3 (2026-04-28
+    /// migration from api.contextly.me — single shared gateway across
+    /// Journely / Tamhon / Miniowl, contextly.me decommissioning at end
+    /// of parallel-run window). Older v2.0.x DMGs in the field still
+    /// hit api.contextly.me and continue working until that domain is
+    /// retired.
     static var baseURL: URL {
         #if MINIOWL_DEV
         return URL(string: "http://localhost:8000/api/v1/miniowl")!
         #else
-        return URL(string: "https://api.contextly.me/api/v1/miniowl")!
+        return URL(string: "https://api.journely.me/api/v1/miniowl")!
         #endif
     }
 
