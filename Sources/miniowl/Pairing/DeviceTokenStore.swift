@@ -5,12 +5,16 @@ import Security
 ///
 /// Replaces the Phase 2a token.txt file approach with proper macOS Keychain
 /// integration. Tokens are stored with:
-/// - Service: com.contextly.miniowl
+/// - Service: com.journelyme.miniowl
 /// - Account: device_token
 /// - Accessibility: AfterFirstUnlockThisDeviceOnly (no iCloud sync, requires unlock)
+///
+/// v2.0.4 renamed the service ID from `com.contextly.miniowl` (matching the
+/// retired contextly GitHub org) to `com.journelyme.miniowl`. Existing v2.0.x
+/// users on the old ID will appear unpaired and need to re-pair once.
 struct DeviceTokenStore {
 
-    private static let service = "com.contextly.miniowl"
+    private static let service = "com.journelyme.miniowl"
     private static let account = "device_token"
 
     enum KeychainError: Error, LocalizedError {

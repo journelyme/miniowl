@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.4] — 2026-04-29
+
+Final cleanup of the contextly→journely org rename. The Keychain
+service identifier used to store the pairing device token moves from
+`com.contextly.miniowl` to `com.journelyme.miniowl` to match the
+GitHub org consolidation.
+
+### Changed
+
+- **`Sources/miniowl/Pairing/DeviceTokenStore.swift`** — Keychain
+  service ID renamed. Header comment updated. Same `Account`
+  (`device_token`) and same accessibility flags
+  (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`).
+
+### One-time impact for existing users
+
+Anyone paired on v2.0.0–2.0.3 will appear unpaired after upgrading to
+v2.0.4. The menu bar will show "Connect account…" again. Re-pair once
+(opens the browser to miniowl.me/pair) and you're back. Local activity
+data on disk is unaffected — the only thing reset is the cloud-sync
+device token in Keychain.
+
+We chose the no-migration approach (vs. reading the old service ID and
+copying the token to the new one) because the Mac app only has a
+handful of paired users at this point and the friction of "click
+Connect account once" is smaller than the maintenance cost of carrying
+a migration shim forever.
+
+### Verification
+
+```
+$ codesign -dvv build/miniowl.app | grep Authority
+Authority=Developer ID Application: JOURNELY LLC (APGC7K5255)
+
+$ lipo -info build/miniowl.app/Contents/MacOS/miniowl
+Architectures in the fat file: ... are: x86_64 arm64
+
+$ spctl -a -v release/miniowl-2.0.4.dmg
+release/miniowl-2.0.4.dmg: accepted
+source=Notarized Developer ID
+```
+
 ## [2.0.3] — 2026-04-29
 
 Production URL migration. The single shared gateway moved from
