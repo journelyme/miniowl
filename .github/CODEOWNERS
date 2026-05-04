@@ -1,0 +1,8 @@
+# Code owners for miniowl
+#
+# Format: <pattern> <owner1> <owner2> ...
+# Owners are auto-requested for review when a PR touches matching files.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+*       @itschunv

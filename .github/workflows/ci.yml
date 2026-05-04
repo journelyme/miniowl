@@ -19,7 +19,11 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # Pinned to full SHA (v4.2.2) — supply-chain hardening. The `v4` tag could be
+        # re-pointed by a compromise of the actions/checkout repo, and CI would silently
+        # run that code with our GITHUB_TOKEN. Pinning to a SHA prevents that.
+        # Bump: `gh api repos/actions/checkout/git/refs/tags/v4.X.X --jq .object.sha`
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Show toolchain
         run: |
