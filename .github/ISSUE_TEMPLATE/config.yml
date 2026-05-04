@@ -1,0 +1,10 @@
+# Disable blank issues — force users to pick a template (bug or feature).
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/journelyme/miniowl/security/advisories/new
+    about: Report security issues privately. Do not open a public issue for security problems.
+  - name: Privacy / data question
+    url: https://miniowl.me/legal/privacy
+    about: Read the privacy contract before filing — it answers most data-handling questions.
