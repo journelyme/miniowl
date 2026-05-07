@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.5] — 2026-05-07
+
+LLM-owned categories. The server-side categorization logic moves from a
+hardcoded 7-category list to LLM-driven naming + zone mapping, informed
+by the user's `~/Library/Application Support/miniowl/context.md`. The
+4 zones — Sweet Spot, Joy+Skill, Need-only, Personal — stay fixed
+(they're the miniowl framework). Categories are now whatever the user
+defines in their context file, or sensible founder defaults inferred
+from window data.
+
+For default users (who haven't customized their context.md): no visual
+change — the LLM continues to produce the same 7 category names you've
+been seeing, and bars stay the same colors.
+
+For power users who customize categories: the menu bar will now color
+custom-named categories correctly via the zone the LLM assigned, instead
+of falling through to gray.
+
+### Added
+
+- **`Sources/miniowl/Categorization/Models.swift`** —
+  - `CategoryBucket.zone: String?` — the LLM-supplied zone for each
+    category, present in v2.0.5+ server responses.
+  - `CircleColor.forZone(_:)` — maps the 4 framework zones to the Mac's
+    visual palette. Used as the primary color resolver, with
+    `forCategory(name)` as the legacy fallback.
+
+- **`Sources/miniowl/Storage/ContextStore.swift`** — the placeholder
+  `context.md` now ships with a `## Categories` block showing the
+  default 7 categories + their zone mappings + LLM hints. Power users
+  who want their own taxonomy can edit, rename, add, or delete blocks.
+
+### Changed
+
+- **`Sources/miniowl/UI/CategoryBarsView.swift`** — `color(for:)` now
+  resolves via `bucket.zone` first; falls back to per-name lookup for
+  cached rollups + pre-v2.0.5 server responses.
+
+### One-time impact for existing users
+
+Cached rollups on disk (written by v2.0.4 or earlier) don't have a
+`zone` field. The view layer falls back to `CircleColor.forCategory()`
+for those — same behavior as before. New rollups (written after the
+upgrade) carry the zone field and use the new resolver.
+
 ## [2.0.4] — 2026-04-29
 
 Final cleanup of the contextly→journely org rename. The Keychain

@@ -34,7 +34,7 @@ struct CategoryBarsView: View {
             ForEach(day.categories) { bucket in
                 CategoryBarRow(
                     bucket: bucket,
-                    color: color(for: bucket.name)
+                    color: color(for: bucket)
                 )
             }
 
@@ -74,8 +74,13 @@ struct CategoryBarsView: View {
         }
     }
 
-    private func color(for name: String) -> Color {
-        switch CircleColor.forCategory(name) {
+    /// Resolve a bucket's color. Prefers the LLM-supplied zone (added v2.0.5),
+    /// falls back to the legacy per-name map for the 7 default category names
+    /// + cached rollups written before the upgrade.
+    private func color(for bucket: CategoryBucket) -> Color {
+        let circle: CircleColor = bucket.zone.map { CircleColor.forZone($0) }
+            ?? CircleColor.forCategory(bucket.name)
+        switch circle {
         case .sweetSpot: return .green
         case .joySkill:  return .yellow
         case .skillNeed: return .orange

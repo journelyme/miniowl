@@ -150,6 +150,25 @@ struct ContextStore {
         - GTM ≥ 25% (outreach, interviews, content shipped)
         - Any user interview completed
         - Strategy + GTM together > Product + Learning
+
+        ## Categories
+
+        These are the buckets the LLM puts every 20-min window into. The
+        4 zones — Sweet Spot, Joy+Skill, Need-only, Personal — are fixed
+        (they're the miniowl framework). Each category below maps to one
+        of those zones. Edit, rename, add, or delete blocks to make this
+        match your work. If you delete the whole `## Categories` section,
+        the LLM falls back to inferring sensible defaults.
+
+        Format: `- **Name** — Zone — Hint for the LLM`
+
+        - **Product** — Joy+Skill — Coding, design, product engineering. Building the thing, not selling it.
+        - **GTM** — Sweet Spot — Sales, marketing, user interviews, content. Anything that talks to a customer or future customer.
+        - **Strategy** — Sweet Spot — Planning, OKRs, vision, market research, competitor analysis.
+        - **Learning** — Joy+Skill — Reading, courses, video tutorials. Avoidance unless tied to a current decision.
+        - **Admin** — Need-only — Email, accounting, legal, taxes, infra config.
+        - **Operations** — Need-only — Customer support, internal ops, payment ops.
+        - **Personal** — Personal — Non-work — breaks, social, exercise.
         """
         try? placeholder.write(to: fileURL, atomically: true, encoding: .utf8)
     }
