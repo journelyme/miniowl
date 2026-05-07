@@ -53,6 +53,16 @@ struct CategorizationRequest: Codable {
 
 struct CategoryBucket: Codable, Equatable, Identifiable {
     let name: String
+    /// Zone the LLM mapped this category to (added v2.0.5, May 2026).
+    ///
+    /// One of the 4 framework values:
+    ///   "Sweet Spot" | "Joy+Skill" | "Need-only" | "Personal"
+    ///
+    /// Optional because:
+    ///   - Pre-v2.0.5 server responses didn't include this field
+    ///   - Cached rollups on disk written before v2.0.5 don't have it either
+    /// Callers should fall back to `CircleColor.forCategory(name)` when nil.
+    let zone: String?
     let ms: Int64
     let pct: Int
 
@@ -109,6 +119,34 @@ enum CircleColor: String {
         case "Learning":   return .neutral
         case "Admin":      return .skillNeed
         case "Operations": return .skillNeed
+        case "Personal":   return .personal
+        default:           return .neutral
+        }
+    }
+
+    /// Map one of the 4 server-side zones to a Mac visual color.
+    ///
+    /// Added v2.0.5 to support LLM-owned categorization: the server now
+    /// emits a `zone` per category (informed by the user's
+    /// ~/Library/Application Support/miniowl/context.md). This keeps the
+    /// menu bar correctly colored when the user defines their own
+    /// category names — `forCategory(name)` would fall through to
+    /// `.neutral` for any custom name, but `forZone(zone)` always
+    /// resolves to one of the framework's four colors.
+    ///
+    /// Mapping rationale:
+    ///   - "Sweet Spot" → .sweetSpot (green)         — moves business forward
+    ///   - "Joy+Skill"  → .joySkill  (yellow)        — the chronic founder trap
+    ///   - "Need-only"  → .skillNeed (orange)        — preserves current
+    ///                    Admin/Operations color (orange, not red) so users
+    ///                    don't see a sudden visual shift on upgrade.
+    ///   - "Personal"   → .personal  (blue)          — non-work, neutral
+    ///   - unknown      → .neutral   (gray)          — safe fallback
+    static func forZone(_ zone: String) -> CircleColor {
+        switch zone {
+        case "Sweet Spot": return .sweetSpot
+        case "Joy+Skill":  return .joySkill
+        case "Need-only":  return .skillNeed
         case "Personal":   return .personal
         default:           return .neutral
         }
