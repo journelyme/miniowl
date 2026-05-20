@@ -111,8 +111,8 @@ enum CategoryRollup {
     // MARK: - Privacy hygiene helpers
 
     /// Window titles can be long. Trim aggressively — categorization only
-    /// needs the topic word (e.g. "GTM strategy" or "main.go"), not the
-    /// full breadcrumb path that some IDEs include.
+    /// needs the topic word (e.g. "Quarterly review" or "main.go"), not
+    /// the full breadcrumb path that some IDEs include.
     static func truncate(_ s: String, max: Int) -> String {
         if s.count <= max { return s }
         let idx = s.index(s.startIndex, offsetBy: max)
