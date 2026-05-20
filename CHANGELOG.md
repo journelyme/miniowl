@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-05-20
+
+Drop the 3-circles framework. Miniowl is now a general productivity
+tracker — colors come from a shared 36-color palette indexed by a
+deterministic hash of the category name, so the Mac app, dashboard,
+and share card always paint the same category the same color
+regardless of what you call it.
+
+The 4-zone framework (Sweet Spot / Joy+Skill / Need-only / Personal)
+is gone from the Mac app, the server prompt, the dashboard, and the
+landing page. Power users with a personalized `context.md` keep their
+custom category names — the LLM still respects whatever taxonomy you
+defined. Users who never customized their context get a fresh 12-
+category default list covering general knowledge work (Coding, Design,
+Writing, Research, Meetings, Email, Chat, Planning, Customer, Learning,
+Admin, Personal).
+
+The wire protocol stays backward-compatible: server responses no longer
+carry a `zone` field. Old payloads with `zone` are silently accepted
+server-side; pre-2.1.0 Mac clients receive responses without `zone` and
+fall through to per-name color resolution.
+
+### Added
+
+- **`Sources/miniowl/Categorization/CategoryPalette.swift`** — new
+  shared palette + djb2 hash. Cross-language port — identical
+  implementation lives at `apps/miniowl/src/lib/categoryPalette.ts` in
+  the dashboard, so a given category name resolves to the same color
+  everywhere.
+
+### Changed
+
+- **`Sources/miniowl/Categorization/Models.swift`** —
+  - `CategoryBucket.zone` field removed. Old cached `.cats.jsonl` files
+    on disk decode fine — Codable silently drops the unknown key.
+  - `enum CircleColor` + `forCategory()` + `forZone()` deleted.
+    Replaced by `CategoryPalette.color(forCategory:)`.
+
+- **`Sources/miniowl/Storage/ContextStore.swift`** — placeholder
+  `context.md` rewritten for general knowledge workers. New 12-category
+  default list, no more solo-founder-specific persona examples or
+  3-circles vocabulary. Existing `context.md` files are NOT overwritten;
+  power users may want to drop the `— Zone —` columns from their custom
+  taxonomy now that zones are dropped server-side.
+
+- **`Sources/miniowl/UI/CategoryBarsView.swift`** — colors resolved via
+  `CategoryPalette.color(forCategory:)`. Cumulative day bars look the
+  same in spirit; specific category colors will differ from v2.0.x
+  unless they happen to hash to the same palette index.
+
+### Removed
+
+- All references to "Sweet Spot", "Joy+Skill", "Need-only", "3-circles"
+  in Mac UI, doc comments, and the default placeholder.
+
+### Migration notes
+
+- **Existing users with a customized `context.md`:** consider dropping
+  the `— Zone —` mappings from each `## Categories` bullet — the LLM
+  ignores them now. Allocation targets, failing/winning patterns, and
+  category names are still respected.
+
+- **Old DMG installs (≤ 2.0.5):** the server stopped emitting `zone`
+  in responses, so older clients fall through to neutral grey for any
+  category name that isn't in their hardcoded fallback list. Upgrade
+  to 2.1.0 to get correct colors for every category.
+
 ## [2.0.5] — 2026-05-07
 
 LLM-owned categories. The server-side categorization logic moves from a
