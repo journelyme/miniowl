@@ -10,7 +10,7 @@ import Foundation
 ///   - Menu bar popover needs to show the last rollup immediately on
 ///     app restart. Without this, the user sees "waiting for first
 ///     categorization…" every time they relaunch.
-///   - Future analytics ("show me my Sweet Spot % over the last 7 days")
+///   - Future analytics (rolling category totals over arbitrary windows)
 ///     just needs to glob `*.cats.jsonl` and grep.
 ///
 /// Not gzipped: each line is ~500 B, max ~72 lines/day (every 20 min
@@ -163,16 +163,9 @@ struct CategorizationLog {
         if totals.isEmpty { return nil }
 
         let totalMs = totals.values.reduce(0 as Int64, +)
-        // zone: nil — these buckets are aggregated from disk-cached
-        // entries by name only (no zone to carry across summing). The
-        // view falls back to CircleColor.forCategory(name), which is
-        // correct for the default 7 names. Fresh API responses have
-        // zone populated; this nil branch only matters during the
-        // brief warm-start before the next categorize call lands.
         let categories = totals.map { name, ms in
             CategoryBucket(
                 name: name,
-                zone: nil,
                 ms: ms,
                 pct: totalMs > 0 ? Int(Double(ms) / Double(totalMs) * 100) : 0
             )
@@ -226,12 +219,9 @@ struct CategorizationLog {
         if totals.isEmpty { return [] }
 
         let totalMs = totals.values.reduce(0 as Int64, +)
-        // See comment on the other CategoryBucket-construction site
-        // above re: zone: nil.
         let sorted = totals.map { name, ms in
             CategoryBucket(
                 name: name,
-                zone: nil,
                 ms: ms,
                 pct: totalMs > 0 ? Int(Double(ms) / Double(totalMs) * 100) : 0
             )

@@ -105,7 +105,7 @@ struct MenuContent: View {
                     .foregroundStyle(.secondary)
                 TodaySummaryView(summary: state.summary)
             } else if let day = state.dayCategorization {
-                // PRIMARY: cumulative day view — the 3-circles picture.
+                // PRIMARY: cumulative day view — categorized time bars.
                 CategoryBarsView(day: day)
             } else {
                 // No categorizations yet — show v1 + status.

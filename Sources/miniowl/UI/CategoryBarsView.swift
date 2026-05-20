@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// v2.0 — Cumulative day-level category view for the menu bar.
+/// Cumulative day-level category view for the menu bar.
 ///
 /// PRIMARY view: shows the entire day's allocation ("where is my day
-/// going?") — the real 3-circles honesty meter.
+/// going?"). Colors come from the shared palette hash (name → color),
+/// so the menu bar matches the dashboard and share card.
 ///
 /// Secondary: the last-window LLM summary is shown as a compact one-liner
 /// below the cumulative bars ("what just happened?").
@@ -34,7 +35,7 @@ struct CategoryBarsView: View {
             ForEach(day.categories) { bucket in
                 CategoryBarRow(
                     bucket: bucket,
-                    color: color(for: bucket)
+                    color: CategoryPalette.color(forCategory: bucket.name)
                 )
             }
 
@@ -74,21 +75,6 @@ struct CategoryBarsView: View {
         }
     }
 
-    /// Resolve a bucket's color. Prefers the LLM-supplied zone (added v2.0.5),
-    /// falls back to the legacy per-name map for the 7 default category names
-    /// + cached rollups written before the upgrade.
-    private func color(for bucket: CategoryBucket) -> Color {
-        let circle: CircleColor = bucket.zone.map { CircleColor.forZone($0) }
-            ?? CircleColor.forCategory(bucket.name)
-        switch circle {
-        case .sweetSpot: return .green
-        case .joySkill:  return .yellow
-        case .skillNeed: return .orange
-        case .needOnly:  return .red
-        case .personal:  return .blue
-        case .neutral:   return .gray
-        }
-    }
 }
 
 /// One progress bar + label + duration.

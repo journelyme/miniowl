@@ -3,9 +3,9 @@ import Foundation
 /// File-backed store for the user's personalization context.
 ///
 /// Free-form text store where the user describes their work, projects,
-/// taxonomy preferences, and tone preferences. The server
-/// appends this to the categorization prompt, so every user gets a
-/// customized experience without hardcoding Trung's specifics on the server.
+/// taxonomy preferences, and tone preferences. The server appends this
+/// to the categorization prompt, so every user gets a customized
+/// experience without any hardcoded persona on the server.
 ///
 /// File: `~/Library/Application Support/miniowl/context.md`
 ///
@@ -78,97 +78,55 @@ struct ContextStore {
         let placeholder = """
         # Context for Miniowl categorization
 
-        > EDIT THIS FILE. The example below is a fictional solo founder named
-        > Alex — keep the structure, replace every value with your own work.
+        > EDIT THIS FILE to personalize how miniowl categorizes your time.
         > The server reads this on every categorize call (no app reload needed).
-        > Max 2 KB. Empty = use defaults; the more specific you are, the
+        > Max 8 KB. Empty = use defaults; the more specific you are, the
         > sharper the categorization gets.
 
         ## Who I am
 
-        Solo bootstrapped founder building Acme Ledger, a B2B SaaS for
-        small accounting firms. Pre-PMF, ~$2K MRR. Mac-only, terminal-heavy.
-        Cold outreach drains me — I need this tool to flag when I'm hiding
-        in code instead of talking to users.
+        [Your role + 1–2 sentences. Example: "Software engineer at a fintech
+        startup, working remotely from Tokyo. Heads-down builder; meetings
+        drain me."]
 
-        ## My projects
+        ## My projects / focus areas
 
-        - Acme Ledger — primary product (acme-ledger repo, acme.com)
-        - acme-marketing — landing page + Substack
-        - lab-experiments — side learning, NOT a real project
+        - [Project name] — what it is
+        - [Other responsibilities]
 
-        ## My GTM / outreach activities
+        ## My apps
 
-        - IndieHackers DMs and posts
-        - Twitter/X replies and DMs to other founders
-        - User interviews on Zoom, Google Meet
-        - Reddit posts in r/SaaS, r/EntrepreneurRideAlong
-        - Substack: weekly "Margin Notes" newsletter
-        - LinkedIn comments (not posts — too much noise)
-
-        ## My Strategy activities
-
-        - Business: pricing, positioning, lean canvas, escape velocity, MOAT
-        - Research: competitors, market trends, funding landscape
-        - Reading strategy books (Walling, Maurya, Bush) → Strategy, NOT Learning
-
-        ## My Learning activities
-
-        - Tech tutorials, framework docs, language books
-        - Podcasts (founder + tech)
-        - General reading not tied to a current decision
+        [List apps/sites you use heavily so miniowl maps them right. Example:
+        "Linear = Planning, Notion = Writing, Slack = Chat, Figma = Design,
+        VSCode/iTerm = Coding."]
 
         ## My tone preference
 
-        Direct and brutally honest. Don't soften. If I'm 70% Product and 5%
-        GTM, say "Joy+Skill trap" — that's the vocabulary I use with myself.
-        Use "you" not "we". Slight discomfort is the value; if the summary
-        feels comfortable, it's probably wrong. Founder-tribal language is
-        fine (Joy+Skill trap, Sweet Spot, 3-circles).
+        [How blunt do you want the summary? "Direct" / "Encouraging" /
+        "Neutral data only". Default is neutral data-led summaries.]
 
-        ## My ideal allocation (weekday targets)
+        ## My ideal allocation (weekday targets, optional)
 
-        When writing day_summary, compare against these and flag when off:
-
-        - Product: 35–45% (building is fine, but capped)
-        - GTM: 25–35% (the under-done bucket — flag if below 15%)
-        - Strategy: 10–15%
-        - Learning: 5–10% (flag if >30% on weekday — avoidance)
-        - Admin: 5%
-        - Operations: 5%
-        - Personal: 5–15% on workdays, more on weekends (fine)
-
-        ## Failing patterns (flag explicitly)
-
-        - GTM < 10% → Joy+Skill trap
-        - Product > 60% with GTM < 15% → classic avoidance pattern
-        - Learning > 30% on weekday → "preparing instead of doing"
-        - Personal > 30% during 10am–6pm → probably distracted
-
-        ## Winning patterns (celebrate explicitly)
-
-        - GTM ≥ 25% (outreach, interviews, content shipped)
-        - Any user interview completed
-        - Strategy + GTM together > Product + Learning
+        [Example: "Coding 50%, Meetings 20%, Email 10%, Planning 10%, other 10%."]
 
         ## Categories
 
-        These are the buckets the LLM puts every 20-min window into. The
-        4 zones — Sweet Spot, Joy+Skill, Need-only, Personal — are fixed
-        (they're the miniowl framework). Each category below maps to one
-        of those zones. Edit, rename, add, or delete blocks to make this
-        match your work. If you delete the whole `## Categories` section,
-        the LLM falls back to inferring sensible defaults.
+        The default 12 categories below cover most knowledge work. Edit, rename,
+        or add to fit your role. If you delete this section entirely, the LLM
+        falls back to inferring categories from your activity.
 
-        Format: `- **Name** — Zone — Hint for the LLM`
-
-        - **Product** — Joy+Skill — Coding, design, product engineering. Building the thing, not selling it.
-        - **GTM** — Sweet Spot — Sales, marketing, user interviews, content. Anything that talks to a customer or future customer.
-        - **Strategy** — Sweet Spot — Planning, OKRs, vision, market research, competitor analysis.
-        - **Learning** — Joy+Skill — Reading, courses, video tutorials. Avoidance unless tied to a current decision.
-        - **Admin** — Need-only — Email, accounting, legal, taxes, infra config.
-        - **Operations** — Need-only — Customer support, internal ops, payment ops.
-        - **Personal** — Personal — Non-work — breaks, social, exercise.
+        - **Coding** — Software development, debugging, code review, building features
+        - **Design** — UI/UX, graphics, Figma, prototyping, visual work
+        - **Writing** — Docs, blog posts, articles, reports, specifications
+        - **Research** — Reading articles, market research, data analysis, deep work
+        - **Meetings** — Video calls (Zoom/Meet/Teams), in-person, async standups
+        - **Email** — Email triage, replies, threads in any mail client
+        - **Chat** — Slack, Teams, Discord, Telegram (work)
+        - **Planning** — Sprint planning, task lists, project management (Linear/Jira/Notion)
+        - **Customer** — Sales, support, user interviews, customer-facing communication
+        - **Learning** — Courses, tutorials, documentation reading, skill building
+        - **Admin** — Invoices, expenses, scheduling, paperwork, taxes, ops
+        - **Personal** — Non-work activity — breaks, social media (personal), errands
         """
         try? placeholder.write(to: fileURL, atomically: true, encoding: .utf8)
     }
